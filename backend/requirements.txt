@@ -1,0 +1,22 @@
+# FastAPI and server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.6
+
+# Database (2.0.36+ for Python 3.13 support)
+sqlalchemy>=2.0.36
+alembic>=1.13.1
+
+# HTTP client for Teller API
+httpx==0.26.0
+
+# Environment and config
+python-dotenv==1.0.0
+pydantic-settings==2.1.0
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Utilities
+python-dateutil==2.8.2

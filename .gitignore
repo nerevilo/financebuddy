@@ -1,0 +1,49 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Certificates (KEEP THESE SECRET)
+*.pem
+teller.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite
+
+# Node
+node_modules/
+.next/
+out/
+.vercel
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
