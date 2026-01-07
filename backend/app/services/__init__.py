@@ -1,3 +1,4 @@
 from .teller import TellerService
+from .categorization import TransferDetector
 
-__all__ = ["TellerService"]
+__all__ = ["TellerService", "TransferDetector"]

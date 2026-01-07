@@ -13,6 +13,7 @@ from collections import defaultdict
 from ..core.database import get_db
 from ..models import Transaction, Account, Institution
 from ..schemas import SpendingByCategory, SpendingByMerchant
+from ..services.categorization import TransferDetector
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -72,6 +73,9 @@ async def get_spending_by_category(
     else:
         start, end = get_date_range(period)
 
+    # Initialize transfer detector with database session for account matching
+    transfer_detector = TransferDetector(db=db)
+
     # Get all expense transactions (negative amounts)
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
@@ -82,10 +86,16 @@ async def get_spending_by_category(
         )
     ).all()
 
+    # Filter out transfers (they're not real spending)
+    spending_transactions = [
+        tx for tx in transactions
+        if not transfer_detector.is_transfer(tx)
+    ]
+
     # Aggregate by category
     category_totals = defaultdict(lambda: {"total": 0, "count": 0})
 
-    for tx in transactions:
+    for tx in spending_transactions:
         category = tx.teller_category or "uncategorized"
         category_totals[category]["total"] += abs(tx.amount)
         category_totals[category]["count"] += 1
@@ -128,6 +138,9 @@ async def get_spending_by_merchant(
     else:
         start, end = get_date_range(period)
 
+    # Initialize transfer detector with database session for account matching
+    transfer_detector = TransferDetector(db=db)
+
     # Get all expense transactions
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
@@ -138,10 +151,16 @@ async def get_spending_by_merchant(
         )
     ).all()
 
+    # Filter out transfers (they're not real spending)
+    spending_transactions = [
+        tx for tx in transactions
+        if not transfer_detector.is_transfer(tx)
+    ]
+
     # Aggregate by merchant
     merchant_totals = defaultdict(lambda: {"total": 0, "count": 0})
 
-    for tx in transactions:
+    for tx in spending_transactions:
         merchant = tx.merchant_name or tx.description[:30] or "Unknown"
         merchant_totals[merchant]["total"] += abs(tx.amount)
         merchant_totals[merchant]["count"] += 1
@@ -177,6 +196,9 @@ async def get_spending_trends(
     """Get spending trends over time."""
     start_date = date.today() - timedelta(days=months * 30)
 
+    # Initialize transfer detector with database session for account matching
+    transfer_detector = TransferDetector(db=db)
+
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
@@ -184,10 +206,16 @@ async def get_spending_trends(
         )
     ).all()
 
+    # Filter out transfers
+    non_transfer_transactions = [
+        tx for tx in transactions
+        if not transfer_detector.is_transfer(tx)
+    ]
+
     # Aggregate by period
     period_data = defaultdict(lambda: {"income": 0, "expenses": 0})
 
-    for tx in transactions:
+    for tx in non_transfer_transactions:
         if granularity == "monthly":
             period_key = tx.date.strftime("%Y-%m")
         elif granularity == "weekly":
@@ -221,34 +249,41 @@ async def get_period_comparison(
     """Compare spending between current and previous period."""
     current_start, current_end = get_date_range(current_period)
 
+    # Initialize transfer detector with database session for account matching
+    transfer_detector = TransferDetector(db=db)
+
     # Calculate previous period
     period_length = (current_end - current_start).days
     previous_end = current_start - timedelta(days=1)
     previous_start = previous_end - timedelta(days=period_length)
 
-    # Get current period spending
-    current_spending = db.query(func.sum(func.abs(Transaction.amount))).join(
-        Account
-    ).join(Institution).filter(
+    # Get current period transactions
+    current_all_txs = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
             Transaction.date >= current_start,
             Transaction.date <= current_end,
             Transaction.amount < 0
         )
-    ).scalar() or 0
+    ).all()
 
-    # Get previous period spending
-    previous_spending = db.query(func.sum(func.abs(Transaction.amount))).join(
-        Account
-    ).join(Institution).filter(
+    # Filter out transfers and calculate spending
+    current_spending_filtered = [tx for tx in current_all_txs if not transfer_detector.is_transfer(tx)]
+    current_spending = sum(abs(tx.amount) for tx in current_spending_filtered)
+
+    # Get previous period transactions
+    previous_all_txs = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
             Transaction.date >= previous_start,
             Transaction.date <= previous_end,
             Transaction.amount < 0
         )
-    ).scalar() or 0
+    ).all()
+
+    # Filter out transfers and calculate spending
+    previous_spending_filtered = [tx for tx in previous_all_txs if not transfer_detector.is_transfer(tx)]
+    previous_spending = sum(abs(tx.amount) for tx in previous_spending_filtered)
 
     change_amount = current_spending - previous_spending
     change_percentage = (change_amount / previous_spending * 100) if previous_spending > 0 else 0
@@ -267,7 +302,10 @@ async def get_period_comparison(
         )
     ).all()
 
-    for tx in current_txs:
+    # Filter out transfers
+    current_spending_txs = [tx for tx in current_txs if not transfer_detector.is_transfer(tx)]
+
+    for tx in current_spending_txs:
         cat = tx.teller_category or "uncategorized"
         current_by_cat[cat] += abs(tx.amount)
 
@@ -282,7 +320,10 @@ async def get_period_comparison(
         )
     ).all()
 
-    for tx in previous_txs:
+    # Filter out transfers
+    previous_spending_txs = [tx for tx in previous_txs if not transfer_detector.is_transfer(tx)]
+
+    for tx in previous_spending_txs:
         cat = tx.teller_category or "uncategorized"
         previous_by_cat[cat] += abs(tx.amount)
 
@@ -324,6 +365,9 @@ async def get_income_expenses(
     """Get income vs expenses summary."""
     start, end = get_date_range(period)
 
+    # Initialize transfer detector with database session for account matching
+    transfer_detector = TransferDetector(db=db)
+
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
@@ -332,8 +376,14 @@ async def get_income_expenses(
         )
     ).all()
 
-    income = sum(tx.amount for tx in transactions if tx.amount > 0)
-    expenses = sum(abs(tx.amount) for tx in transactions if tx.amount < 0)
+    # Filter out transfers (they're not real income or expenses)
+    non_transfer_transactions = [
+        tx for tx in transactions
+        if not transfer_detector.is_transfer(tx)
+    ]
+
+    income = sum(tx.amount for tx in non_transfer_transactions if tx.amount > 0)
+    expenses = sum(abs(tx.amount) for tx in non_transfer_transactions if tx.amount < 0)
     net = income - expenses
     savings_rate = (net / income * 100) if income > 0 else 0
 

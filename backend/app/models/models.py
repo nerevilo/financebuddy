@@ -100,3 +100,26 @@ class Transaction(Base):
     # Relationships
     account = relationship("Account", back_populates="transactions")
     category = relationship("Category", back_populates="transactions")
+
+
+class TransferRule(Base):
+    """
+    User-configurable rules for transfer detection.
+
+    Allows users to add custom keywords or patterns without code changes.
+    Will be used alongside default rules and ML-based detection.
+    """
+    __tablename__ = "transfer_rules"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)  # None = global rule
+    rule_type = Column(String, nullable=False)  # "internal_transfer", "payment", "exclude"
+    pattern = Column(String, nullable=False)  # Keyword or regex pattern
+    is_regex = Column(Boolean, default=False)
+    priority = Column(Float, default=0.0)  # Higher priority rules checked first
+    description = Column(Text, nullable=True)  # Why this rule exists
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", backref="transfer_rules")

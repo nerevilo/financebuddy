@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "description": "Default rules for transfer detection. These can be overridden by user-specific rules in the database.",
+
+  "internal_transfer_keywords": [
+    "WITHDRAWAL TO",
+    "TRANSFER TO",
+    "TRANSFER FROM",
+    "INTERNAL TRANSFER",
+    "BETWEEN ACCOUNTS",
+    "ONLINE XFER",
+    "MOBILE XFER"
+  ],
+
+  "credit_card_payment_keywords": [
+    "CREDIT CARD PAYMENT",
+    "CC PAYMENT",
+    "CARD PAYMENT",
+    "PAY CREDIT CARD",
+    "AUTOPAY",
+    "CC PMT",
+    "PYMT"
+  ],
+
+  "credit_card_companies": [
+    "CHASE",
+    "AMEX",
+    "AMERICAN EXPRESS",
+    "DISCOVER",
+    "CAPITAL ONE",
+    "CITI",
+    "CITIBANK",
+    "BANK OF AMERICA",
+    "WELLS FARGO",
+    "BARCLAYS",
+    "SYNCHRONY",
+    "USAA",
+    "TD BANK",
+    "PNC",
+    "US BANK"
+  ],
+
+  "loan_payment_keywords": [
+    "LOAN PAYMENT",
+    "MORTGAGE PAYMENT",
+    "AUTO PAYMENT",
+    "AUTO LOAN",
+    "STUDENT LOAN",
+    "SAVINGS TRANSFER",
+    "INVESTMENT TRANSFER"
+  ],
+
+  "notes": {
+    "why_configurable": "This file allows admins to add new patterns without code changes. In the future, users can create custom rules via UI.",
+    "ml_transition": "Once ML/Ntropy is implemented, these rules will serve as fallback for edge cases and user overrides.",
+    "adding_keywords": "To add a keyword: 1) Add it to the appropriate array, 2) Restart the server. User-specific rules can be added via database."
+  }
+}
