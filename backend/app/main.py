@@ -13,7 +13,8 @@ from .routers import (
     transactions_router,
     analytics_router,
     teller_router,
-    categorization_router
+    categorization_router,
+    dashboard_router
 )
 
 # Create database tables
@@ -46,6 +47,7 @@ app.include_router(accounts_router)
 app.include_router(transactions_router)
 app.include_router(analytics_router)
 app.include_router(categorization_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/")

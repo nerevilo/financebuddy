@@ -3,11 +3,13 @@ from .transactions import router as transactions_router
 from .analytics import router as analytics_router
 from .teller_connect import router as teller_router
 from .categorization import router as categorization_router
+from .dashboard import router as dashboard_router
 
 __all__ = [
     "accounts_router",
     "transactions_router",
     "analytics_router",
     "teller_router",
-    "categorization_router"
+    "categorization_router",
+    "dashboard_router"
 ]

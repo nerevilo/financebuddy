@@ -68,3 +68,20 @@ export const saveTellerConnection = (payload: {
 
 export const syncInstitution = (institutionId: string) =>
   fetchAPI(`/teller/sync/${institutionId}`, { method: 'POST' });
+
+// Dashboard endpoints (new insight-driven dashboard)
+export const getDashboardStats = () => fetchAPI<any>('/api/dashboard/stats');
+export const getDailyInsight = () => fetchAPI<any>('/api/dashboard/insight');
+export const getSpendingVelocity = () => fetchAPI<any>('/api/dashboard/velocity');
+export const getMonthlyComparison = () => fetchAPI<any>('/api/dashboard/comparison');
+export const getCategoryBreakdown = (month?: number, year?: number) => {
+  const params = new URLSearchParams();
+  if (month) params.set('month', month.toString());
+  if (year) params.set('year', year.toString());
+  const query = params.toString();
+  return fetchAPI<any>(`/api/dashboard/categories${query ? `?${query}` : ''}`);
+};
+export const getTopMerchants = (limit = 10) =>
+  fetchAPI<any[]>(`/api/dashboard/top-merchants?limit=${limit}`);
+export const getDashboardRecentTransactions = (limit = 10) =>
+  fetchAPI<any[]>(`/api/dashboard/recent-transactions?limit=${limit}`);
