@@ -97,6 +97,14 @@ class Transaction(Base):
     status = Column(String, default="posted")  # posted, pending
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # ML Enrichment Fields (Ntropy API results)
+    enriched_merchant = Column(String, nullable=True)  # Clean merchant name from Ntropy
+    enriched_category = Column(String, nullable=True)  # Category from ML/Ntropy
+    is_transfer = Column(Boolean, default=False)  # Transfer flag from detection
+    categorization_source = Column(String, nullable=True)  # 'rule', 'bert', 'ntropy'
+    categorization_confidence = Column(Float, nullable=True)  # Confidence score 0.0-1.0
+    enriched_at = Column(DateTime, nullable=True)  # When enrichment was performed
+
     # Relationships
     account = relationship("Account", back_populates="transactions")
     category = relationship("Category", back_populates="transactions")

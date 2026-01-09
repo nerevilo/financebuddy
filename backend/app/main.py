@@ -8,7 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
 from .core.database import engine, Base
-from .routers import accounts_router, transactions_router, analytics_router, teller_router
+from .routers import (
+    accounts_router,
+    transactions_router,
+    analytics_router,
+    teller_router,
+    categorization_router
+)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -39,6 +45,7 @@ app.include_router(teller_router)
 app.include_router(accounts_router)
 app.include_router(transactions_router)
 app.include_router(analytics_router)
+app.include_router(categorization_router)
 
 
 @app.get("/")

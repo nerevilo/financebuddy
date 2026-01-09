@@ -6,6 +6,7 @@ python-multipart>=0.0.6
 # Database (2.0.36+ for Python 3.13 support)
 sqlalchemy>=2.0.36
 alembic>=1.13.1
+psycopg2-binary>=2.9.0  # PostgreSQL driver
 
 # HTTP client for Teller API
 httpx==0.26.0
@@ -20,3 +21,8 @@ passlib[bcrypt]==1.7.4
 
 # Utilities
 python-dateutil==2.8.2
+
+# AI/ML Services
+openai>=1.0.0  # OpenAI GPT-4 with function calling
+tavily-python>=0.3.0  # Tavily search API (AI-optimized)
+anthropic>=0.18.0  # Claude API
