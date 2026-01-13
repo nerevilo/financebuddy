@@ -5,17 +5,21 @@ Endpoints for transaction enrichment, categorization, and ML-based merchant reco
 """
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_
 from datetime import datetime
 from typing import List, Optional
 
 from ..core.database import get_db
+from ..core.auth import get_current_user
+from ..core.logging_config import get_logger
 from ..services.categorization import TransferDetector
 from ..services.ntropy_client import NtropyClient
 from ..services.cascade_enrichment import CascadeEnrichment
-from ..models.models import Transaction, Account, Institution
+from ..services.budget_enrichment import BudgetEnrichmentService
+from ..models.models import Transaction, Account, Institution, User
 from pydantic import BaseModel
 
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/categorization", tags=["categorization"])
 
@@ -49,7 +53,7 @@ async def enrich_transactions_task(db: Session):
     ntropy_client = NtropyClient()
 
     if not ntropy_client.is_enabled():
-        print("Ntropy is not enabled. Skipping enrichment.")
+        logger.warning("Ntropy is not enabled. Skipping enrichment.")
         return
 
     # Get all transactions without enrichment
@@ -57,7 +61,7 @@ async def enrich_transactions_task(db: Session):
         Transaction.enriched_merchant == None
     ).all()
 
-    print(f"Starting enrichment for {len(transactions)} transactions...")
+    logger.info("Starting enrichment", extra={"transaction_count": len(transactions)})
 
     enriched_count = 0
     transfer_count = 0
@@ -86,23 +90,24 @@ async def enrich_transactions_task(db: Session):
                     enriched_count += 1
 
             except Exception as e:
-                print(f"Failed to enrich transaction {tx.id}: {e}")
+                logger.error("Failed to enrich transaction", extra={"transaction_id": tx.id, "error": str(e)})
                 continue
 
         # Commit in batches of 50 for efficiency
         if (enriched_count + transfer_count) % 50 == 0:
             db.commit()
-            print(f"Progress: {enriched_count} enriched, {transfer_count} transfers")
+            logger.debug("Enrichment progress", extra={"enriched": enriched_count, "transfers": transfer_count})
 
     # Final commit
     db.commit()
-    print(f"Enrichment complete: {enriched_count} enriched, {transfer_count} transfers")
+    logger.info("Enrichment complete", extra={"enriched": enriched_count, "transfers": transfer_count})
 
 
 @router.post("/enrich/all", response_model=EnrichmentStatus)
 async def enrich_all_transactions(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Enrich all uncategorized transactions using Ntropy.
@@ -112,10 +117,12 @@ async def enrich_all_transactions(
     1. Detect and flag internal transfers
     2. Enrich non-transfers with Ntropy merchant/category data
     """
-    total = db.query(Transaction).count()
-    enriched = db.query(Transaction).filter(
-        Transaction.enriched_merchant != None
-    ).count()
+    # Count only user's transactions
+    user_txs = db.query(Transaction).join(Account).join(Institution).filter(
+        Institution.user_id == current_user.id
+    )
+    total = user_txs.count()
+    enriched = user_txs.filter(Transaction.enriched_merchant != None).count()
 
     # Start background task
     background_tasks.add_task(enrich_transactions_task, db)
@@ -131,15 +138,19 @@ async def enrich_all_transactions(
 @router.post("/enrich/{transaction_id}")
 async def enrich_single_transaction(
     transaction_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Enrich a single transaction by ID.
 
     Useful for re-enriching specific transactions or testing.
     """
-    transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id
+    transaction = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
     ).first()
 
     if not transaction:
@@ -194,23 +205,28 @@ async def enrich_single_transaction(
 
 
 @router.get("/stats", response_model=CategoryStats)
-def get_categorization_stats(db: Session = Depends(get_db)):
-    """Get statistics on categorization coverage"""
-    total = db.query(Transaction).count()
-    enriched = db.query(Transaction).filter(
-        Transaction.enriched_merchant != None
-    ).count()
-    transfers = db.query(Transaction).filter(
-        Transaction.is_transfer == True
-    ).count()
+def get_categorization_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get statistics on categorization coverage for current user"""
+    user_txs = db.query(Transaction).join(Account).join(Institution).filter(
+        Institution.user_id == current_user.id
+    )
+    total = user_txs.count()
+    enriched = user_txs.filter(Transaction.enriched_merchant != None).count()
+    transfers = user_txs.filter(Transaction.is_transfer == True).count()
 
-    # Count by source
+    # Count by source for user's transactions
     by_source = {}
     source_counts = db.query(
         Transaction.categorization_source,
         func.count(Transaction.id)
-    ).filter(
-        Transaction.categorization_source != None
+    ).join(Account).join(Institution).filter(
+        and_(
+            Institution.user_id == current_user.id,
+            Transaction.categorization_source != None
+        )
     ).group_by(
         Transaction.categorization_source
     ).all()
@@ -261,28 +277,38 @@ async def get_ntropy_status():
 
 
 @router.delete("/clear-enrichment")
-def clear_all_enrichment(db: Session = Depends(get_db)):
+def clear_all_enrichment(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
-    Clear all enrichment data from transactions.
+    Clear all enrichment data from user's transactions.
 
-    WARNING: This will delete all Ntropy enrichment results.
+    WARNING: This will delete all Ntropy enrichment results for your transactions.
     Useful for testing or re-enriching with different settings.
     """
-    count = db.query(Transaction).filter(
-        Transaction.enriched_merchant != None
-    ).count()
+    # Get user's transaction IDs
+    user_tx_ids = db.query(Transaction.id).join(Account).join(Institution).filter(
+        and_(
+            Institution.user_id == current_user.id,
+            Transaction.enriched_merchant != None
+        )
+    ).all()
+    tx_ids = [tx_id for (tx_id,) in user_tx_ids]
+    count = len(tx_ids)
 
-    # Clear enrichment fields
-    db.query(Transaction).update({
-        Transaction.enriched_merchant: None,
-        Transaction.enriched_category: None,
-        Transaction.is_transfer: False,
-        Transaction.categorization_source: None,
-        Transaction.categorization_confidence: None,
-        Transaction.enriched_at: None
-    })
+    # Clear enrichment fields only for user's transactions
+    if tx_ids:
+        db.query(Transaction).filter(Transaction.id.in_(tx_ids)).update({
+            Transaction.enriched_merchant: None,
+            Transaction.enriched_category: None,
+            Transaction.is_transfer: False,
+            Transaction.categorization_source: None,
+            Transaction.categorization_confidence: None,
+            Transaction.enriched_at: None
+        }, synchronize_session=False)
 
-    db.commit()
+        db.commit()
 
     return {
         "message": "Enrichment data cleared",
@@ -320,7 +346,7 @@ async def cascade_enrich_transactions_task(db: Session):
         Transaction.enriched_merchant == None
     ).all()
 
-    print(f"Starting cascade enrichment for {len(transactions)} transactions...")
+    logger.info("Starting cascade enrichment", extra={"transaction_count": len(transactions)})
 
     enriched_count = 0
     transfer_count = 0
@@ -349,31 +375,37 @@ async def cascade_enrich_transactions_task(db: Session):
                     enriched_count += 1
 
             except Exception as e:
-                print(f"Failed to enrich transaction {tx.id}: {e}")
+                logger.error("Failed to enrich transaction", extra={"transaction_id": tx.id, "error": str(e)})
                 continue
 
         # Commit in batches of 50 for efficiency
         if (enriched_count + transfer_count) % 50 == 0:
             db.commit()
-            print(f"Progress: {enriched_count} enriched, {transfer_count} transfers")
+            logger.debug("Cascade enrichment progress", extra={"enriched": enriched_count, "transfers": transfer_count})
 
     # Final commit
     db.commit()
 
-    # Print final stats
+    # Log final stats
     stats = cascade.get_stats()
-    print(f"Cascade enrichment complete!")
-    print(f"  Enriched: {enriched_count}")
-    print(f"  Transfers: {transfer_count}")
-    print(f"  Total cost: ${stats['total_cost']}")
-    print(f"  Saved: ${stats['savings_amount']} ({stats['savings_percent']}%)")
-    print(f"  Methods: {stats['methods_used']}")
+    logger.info(
+        "Cascade enrichment complete",
+        extra={
+            "enriched": enriched_count,
+            "transfers": transfer_count,
+            "total_cost": stats['total_cost'],
+            "savings_amount": stats['savings_amount'],
+            "savings_percent": stats['savings_percent'],
+            "methods_used": stats['methods_used']
+        }
+    )
 
 
 @router.post("/cascade/enrich/all", response_model=EnrichmentStatus)
 async def cascade_enrich_all(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Enrich all transactions using CASCADE strategy (Pattern → LLM → Search → Ntropy).
@@ -386,10 +418,11 @@ async def cascade_enrich_all(
 
     Expected: 88-95% cost savings vs Ntropy-only!
     """
-    total = db.query(Transaction).count()
-    enriched = db.query(Transaction).filter(
-        Transaction.enriched_merchant != None
-    ).count()
+    user_txs = db.query(Transaction).join(Account).join(Institution).filter(
+        Institution.user_id == current_user.id
+    )
+    total = user_txs.count()
+    enriched = user_txs.filter(Transaction.enriched_merchant != None).count()
 
     # Start background task
     background_tasks.add_task(cascade_enrich_transactions_task, db)
@@ -406,7 +439,8 @@ async def cascade_enrich_all(
 async def cascade_enrich_single(
     transaction_id: str,
     force_method: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Enrich a single transaction using CASCADE strategy.
@@ -418,8 +452,11 @@ async def cascade_enrich_single(
 
     Returns enrichment result with method used and cost.
     """
-    transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id
+    transaction = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
     ).first()
 
     if not transaction:
@@ -501,7 +538,8 @@ def get_cascade_stats():
 @router.post("/cascade/test/{transaction_id}")
 async def test_enrichment_methods(
     transaction_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Test ALL enrichment methods on a single transaction.
@@ -517,8 +555,11 @@ async def test_enrichment_methods(
     3. Claude Haiku + Search
     4. Ntropy (if enabled)
     """
-    transaction = db.query(Transaction).filter(
-        Transaction.id == transaction_id
+    transaction = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
     ).first()
 
     if not transaction:
@@ -569,3 +610,68 @@ async def test_enrichment_methods(
             "recommended": "Use cascade endpoint - auto-selects best method"
         }
     }
+
+
+# ========================================
+# BUDGET-AWARE ENRICHMENT ENDPOINTS
+# ========================================
+# These respect per-user $1.00 budget limits
+# ========================================
+
+
+class BudgetStatus(BaseModel):
+    total_transactions: int
+    enriched: int
+    unenriched: int
+    budget_total: float
+    budget_spent: float
+    budget_remaining: float
+
+
+class BudgetEnrichResult(BaseModel):
+    enriched: int
+    transfers_detected: int
+    cost: float
+    budget_remaining: float
+    budget_spent: float
+
+
+@router.get("/budget/status", response_model=BudgetStatus)
+async def get_enrichment_budget_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get user's enrichment budget status.
+
+    Shows:
+    - Total/enriched/unenriched transaction counts
+    - Budget total, spent, and remaining
+    """
+    service = BudgetEnrichmentService(db)
+    return service.get_user_enrichment_stats(current_user.id)
+
+
+@router.post("/budget/enrich", response_model=BudgetEnrichResult)
+async def enrich_with_budget(
+    max_transactions: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Enrich user's transactions within their budget limit.
+
+    - Automatically stops when budget is exhausted
+    - max_transactions: Optional limit on how many to process
+    - Default budget: $1.00 per user
+    """
+    service = BudgetEnrichmentService(db)
+    result = await service.enrich_user_transactions(
+        current_user.id,
+        max_transactions=max_transactions
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result

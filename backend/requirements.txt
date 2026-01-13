@@ -19,6 +19,9 @@ pydantic-settings==2.1.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 
+# Rate limiting
+slowapi>=0.1.9
+
 # Utilities
 python-dateutil==2.8.2
 
@@ -26,3 +29,6 @@ python-dateutil==2.8.2
 openai>=1.0.0  # OpenAI GPT-4 with function calling
 tavily-python>=0.3.0  # Tavily search API (AI-optimized)
 anthropic>=0.18.0  # Claude API
+
+# Caching (optional - app works without Redis)
+redis>=5.0.0  # Redis client with async support

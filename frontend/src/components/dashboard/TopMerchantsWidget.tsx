@@ -33,7 +33,7 @@ export function TopMerchantsWidget({ merchants }: TopMerchantsWidgetProps) {
               </div>
               {merchant.insight && (
                 <div className="mt-1 text-xs text-blue-600 font-medium">
-                  💡 {merchant.insight}
+                  {merchant.insight}
                 </div>
               )}
             </div>

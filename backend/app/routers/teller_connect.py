@@ -3,39 +3,57 @@ Teller Connect Router
 
 Handles enrollment callbacks from Teller Connect frontend widget.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
-from ..core.database import get_db
+from ..core.database import get_db, SessionLocal
+from ..core.auth import get_current_user
+from ..core.logging_config import get_logger
 from ..models import Institution, Account, Transaction, User
 from ..services.teller import TellerService
+from ..services.budget_enrichment import BudgetEnrichmentService
 from ..schemas import TellerConnectPayload
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/teller", tags=["teller"])
+
+
+async def enrich_new_transactions_task(user_id: str, transaction_ids: list):
+    """Background task to enrich new transactions."""
+    if not transaction_ids:
+        return
+
+    db = SessionLocal()
+    try:
+        service = BudgetEnrichmentService(db)
+        result = await service.enrich_new_transactions(user_id, transaction_ids)
+        logger.info("Auto-enrichment complete", extra={"result": result, "user_id": user_id})
+    except Exception as e:
+        logger.error("Auto-enrichment error", extra={"error": str(e), "user_id": user_id})
+    finally:
+        db.close()
 
 
 @router.post("/connect")
 async def handle_teller_connect(
     payload: TellerConnectPayload,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Handle the callback from Teller Connect.
 
     This endpoint receives the access token and enrollment info
     after a user successfully connects their bank account.
+    Requires authentication - connects bank to the logged-in user.
     """
     access_token = payload.accessToken
     enrollment = payload.enrollment
 
-    # For MVP, create a default user if none exists
-    user = db.query(User).first()
-    if not user:
-        user = User(email="demo@example.com", name="Demo User")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    # Use the authenticated user
+    user = current_user
 
     # Check if enrollment already exists
     existing = db.query(Institution).filter(
@@ -66,7 +84,7 @@ async def handle_teller_connect(
     # Sync accounts from Teller
     try:
         teller = TellerService(access_token=access_token)
-        accounts_data = teller.get_accounts()
+        accounts_data = await teller.get_accounts()
 
         for acc_data in accounts_data:
             existing_account = db.query(Account).filter(
@@ -97,7 +115,7 @@ async def handle_teller_connect(
 
     except Exception as e:
         # Log error but don't fail - accounts can be synced later
-        print(f"Error syncing accounts: {e}")
+        logger.error("Error syncing accounts", extra={"error": str(e), "institution_id": institution.id})
 
     return {
         "success": True,
@@ -109,11 +127,14 @@ async def handle_teller_connect(
 @router.post("/sync/{institution_id}")
 async def sync_institution(
     institution_id: str,
-    db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Sync accounts and transactions for an institution."""
     institution = db.query(Institution).filter(
-        Institution.id == institution_id
+        Institution.id == institution_id,
+        Institution.user_id == current_user.id
     ).first()
 
     if not institution:
@@ -122,9 +143,10 @@ async def sync_institution(
     teller = TellerService(access_token=institution.teller_access_token)
 
     # Sync accounts
-    accounts_data = teller.get_accounts()
+    accounts_data = await teller.get_accounts()
     synced_accounts = 0
     synced_transactions = 0
+    new_transaction_ids = []  # Track new transactions for enrichment
 
     for acc_data in accounts_data:
         # Find or create account
@@ -148,15 +170,15 @@ async def sync_institution(
 
         # Get balances
         try:
-            balances = teller.get_account_balances(acc_data["id"])
+            balances = await teller.get_account_balances(acc_data["id"])
             account.current_balance = float(balances.get("ledger", 0))
             account.available_balance = float(balances.get("available", 0)) if balances.get("available") else None
         except Exception as e:
-            print(f"Error getting balances for {acc_data['id']}: {e}")
+            logger.error("Error getting balances", extra={"error": str(e), "account_id": acc_data['id']})
 
         # Get transactions
         try:
-            transactions_data = teller.get_transactions(acc_data["id"])
+            transactions_data = await teller.get_transactions(acc_data["id"])
 
             for tx_data in transactions_data:
                 existing_tx = db.query(Transaction).filter(
@@ -188,10 +210,12 @@ async def sync_institution(
                         status=tx_data.get("status", "posted")
                     )
                     db.add(tx)
+                    db.flush()  # Get the ID assigned
+                    new_transaction_ids.append(tx.id)
                     synced_transactions += 1
 
         except Exception as e:
-            print(f"Error syncing transactions for {acc_data['id']}: {e}")
+            logger.error("Error syncing transactions", extra={"error": str(e), "account_id": acc_data['id']})
 
         account.last_synced_at = datetime.now(timezone.utc)
         synced_accounts += 1
@@ -199,21 +223,32 @@ async def sync_institution(
     institution.last_synced_at = datetime.now(timezone.utc)
     db.commit()
 
+    # Trigger auto-enrichment for new transactions in background
+    if new_transaction_ids:
+        background_tasks.add_task(
+            enrich_new_transactions_task,
+            current_user.id,
+            new_transaction_ids
+        )
+
     return {
         "success": True,
         "synced_accounts": synced_accounts,
-        "synced_transactions": synced_transactions
+        "synced_transactions": synced_transactions,
+        "enrichment_queued": len(new_transaction_ids)
     }
 
 
 @router.delete("/disconnect/{institution_id}")
 async def disconnect_institution(
     institution_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Disconnect an institution."""
     institution = db.query(Institution).filter(
-        Institution.id == institution_id
+        Institution.id == institution_id,
+        Institution.user_id == current_user.id
     ).first()
 
     if not institution:
@@ -222,9 +257,9 @@ async def disconnect_institution(
     # Try to delete enrollment from Teller
     try:
         teller = TellerService(access_token=institution.teller_access_token)
-        teller.delete_enrollment()
+        await teller.delete_enrollment()
     except Exception as e:
-        print(f"Error deleting Teller enrollment: {e}")
+        logger.error("Error deleting Teller enrollment", extra={"error": str(e), "institution_id": institution_id})
 
     # Mark as disconnected (keep data for historical reference)
     institution.status = "disconnected"

@@ -2,38 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 249, 250, 251;
-  --background-end-rgb: 255, 255, 255;
+@layer base {
+  :root {
+    /* Design System Colors */
+    --color-primary: 71 85 105;
+    --color-secondary: 20 184 166;
+    --color-success: 16 185 129;
+    --color-danger: 239 68 68;
+    --color-warning: 245 158 11;
+    --color-neutral: 115 115 115;
+
+    /* Background & Foreground */
+    --background: 255 255 255;
+    --foreground: 23 23 23;
+    --muted: 245 245 245;
+    --muted-foreground: 115 115 115;
+
+    /* Border & Ring */
+    --border: 229 229 229;
+    --ring: 71 85 105;
+
+    /* Legacy (for backwards compatibility) */
+    --foreground-rgb: 0, 0, 0;
+    --background-start-rgb: 250, 250, 250;
+    --background-end-rgb: 255, 255, 255;
+  }
+
+  * {
+    @apply border-neutral-200;
+  }
+
+  body {
+    @apply bg-neutral-50 text-neutral-900 antialiased;
+    min-height: 100vh;
+  }
 }
 
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
-  min-height: 100vh;
-}
-
-/* Custom scrollbar */
+/* Custom scrollbar with design system colors */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  @apply bg-neutral-100;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 4px;
+  @apply bg-neutral-400 hover:bg-neutral-500;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #a1a1a1;
+/* Focus visible styles */
+@layer base {
+  *:focus-visible {
+    @apply outline-none ring-2 ring-primary-600 ring-offset-2;
+  }
+}
+
+/* Smooth transitions for theme changes */
+@layer base {
+  * {
+    @apply transition-colors duration-150;
+  }
 }

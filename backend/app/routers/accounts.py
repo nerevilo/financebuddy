@@ -4,21 +4,31 @@ Accounts Router
 API endpoints for managing connected accounts.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_
 from typing import List
 
 from ..core.database import get_db
-from ..models import Account, Institution
+from ..core.auth import get_current_user
+from ..models import Account, Institution, User
 from ..schemas import AccountResponse
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
 @router.get("/", response_model=List[AccountResponse])
-async def get_accounts(db: Session = Depends(get_db)):
-    """Get all connected accounts."""
-    accounts = db.query(Account).join(Institution).filter(
-        Institution.status == "active"
+async def get_accounts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all connected accounts for the current user."""
+    accounts = db.query(Account).options(
+        joinedload(Account.institution)
+    ).join(Institution).filter(
+        and_(
+            Institution.status == "active",
+            Institution.user_id == current_user.id
+        )
     ).all()
 
     result = []
@@ -41,9 +51,20 @@ async def get_accounts(db: Session = Depends(get_db)):
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
-async def get_account(account_id: str, db: Session = Depends(get_db)):
+async def get_account(
+    account_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """Get a specific account by ID."""
-    account = db.query(Account).filter(Account.id == account_id).first()
+    account = db.query(Account).options(
+        joinedload(Account.institution)
+    ).join(Institution).filter(
+        and_(
+            Account.id == account_id,
+            Institution.user_id == current_user.id
+        )
+    ).first()
 
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -63,10 +84,16 @@ async def get_account(account_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/summary/balances")
-async def get_balance_summary(db: Session = Depends(get_db)):
-    """Get summary of all account balances."""
+async def get_balance_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get summary of all account balances for the current user."""
     accounts = db.query(Account).join(Institution).filter(
-        Institution.status == "active"
+        and_(
+            Institution.status == "active",
+            Institution.user_id == current_user.id
+        )
     ).all()
 
     total_balance = 0

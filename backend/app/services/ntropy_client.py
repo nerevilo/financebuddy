@@ -7,7 +7,10 @@ import httpx
 from typing import Dict, List, Optional
 from datetime import datetime
 from ..core.config import get_settings
+from ..core.logging_config import get_logger
 from ..models.models import Transaction
+
+logger = get_logger(__name__)
 
 
 class NtropyClient:
@@ -61,16 +64,16 @@ class NtropyClient:
                     if "already exists" in response.text.lower():
                         return True
                     else:
-                        print(f"Failed to create account holder: {response.status_code} - {response.text}")
+                        logger.error("Failed to create account holder", extra={"status_code": response.status_code, "response": response.text})
                         return False
                 elif response.status_code == 409:
                     return True  # Already exists
                 else:
-                    print(f"Failed to create account holder: {response.status_code} - {response.text}")
+                    logger.error("Failed to create account holder", extra={"status_code": response.status_code, "response": response.text})
                     return False
 
         except Exception as e:
-            print(f"Error creating account holder: {e}")
+            logger.error("Error creating account holder", extra={"error": str(e)})
             return False
 
     async def enrich_transaction(self, transaction: Transaction) -> Optional[Dict]:
@@ -120,7 +123,7 @@ class NtropyClient:
                 )
 
                 if response.status_code != 200:
-                    print(f"Ntropy API error: {response.status_code} - {response.text}")
+                    logger.error("Ntropy API error", extra={"status_code": response.status_code, "response": response.text})
                     return None
 
                 data = response.json()
@@ -145,7 +148,7 @@ class NtropyClient:
                 }
 
         except Exception as e:
-            print(f"Failed to enrich transaction {transaction.id}: {e}")
+            logger.error("Failed to enrich transaction", extra={"transaction_id": transaction.id, "error": str(e)})
             return None
 
     async def enrich_batch(self, transactions: List[Transaction]) -> List[Optional[Dict]]:
@@ -210,5 +213,5 @@ class NtropyClient:
                 return response.status_code == 200
 
         except Exception as e:
-            print(f"Ntropy connection test failed: {e}")
+            logger.error("Ntropy connection test failed", extra={"error": str(e)})
             return False

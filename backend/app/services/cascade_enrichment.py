@@ -27,9 +27,12 @@ from typing import Optional, Dict
 from datetime import datetime
 from ..models.models import Transaction
 from ..core.config import get_settings
+from ..core.logging_config import get_logger
 from .merchant_patterns import MerchantPatternMatcher
 from .gemini_enrichment import GeminiEnrichment
 from .ntropy_client import NtropyClient
+
+logger = get_logger(__name__)
 
 
 class CascadeEnrichment:
@@ -131,7 +134,7 @@ class CascadeEnrichment:
                     "cost": 0.0,
                     "method_used": "pattern_matching"
                 })
-                print(f"✅ Pattern match: {pattern_result['merchant']}")
+                logger.debug("Pattern match", extra={"merchant": pattern_result['merchant']})
                 return result
 
         # Step 3: Try Gemini Flash basic (CHEAP & FREE!)
@@ -151,7 +154,7 @@ class CascadeEnrichment:
                     "cost": 0.000075,
                     "method_used": "llm_basic"
                 })
-                print(f"🤖 Gemini Flash (FREE!): {llm_result['merchant']}")
+                logger.debug("Gemini Flash enrichment", extra={"merchant": llm_result['merchant']})
                 return result
 
         # Step 4: Try Gemini Flash + Search (MODERATE)
@@ -175,7 +178,7 @@ class CascadeEnrichment:
                     "search_query": search_result.get("search_query"),
                     "method_used": "llm_search"
                 })
-                print(f"🔍 Gemini + Search: {search_result['merchant']}")
+                logger.debug("Gemini + Search enrichment", extra={"merchant": search_result['merchant']})
                 return result
 
         # Step 5: Fallback to Ntropy (EXPENSIVE but reliable)
@@ -196,11 +199,11 @@ class CascadeEnrichment:
                     "cost": 0.02,
                     "method_used": "ntropy"
                 })
-                print(f"💰 Ntropy: {ntropy_result.get('merchant')}")
+                logger.debug("Ntropy enrichment", extra={"merchant": ntropy_result.get('merchant')})
                 return result
 
         # If all methods failed
-        print(f"❌ All enrichment methods failed for: {transaction.description}")
+        logger.warning("All enrichment methods failed", extra={"description": transaction.description})
         result["method_used"] = "failed"
         return result
 
@@ -277,9 +280,7 @@ for txn in transactions:
 
 # Get cost stats
 stats = cascade.get_stats()
-print(f"Total cost: ${stats['total_cost']}")
-print(f"Saved: ${stats['savings_amount']} ({stats['savings_percent']}%)")
-print(f"Methods: {stats['methods_used']}")
+# Log stats: Total cost, savings, methods used
 
 # Expected output:
 # Total cost: $0.71

@@ -1,17 +1,41 @@
 from .schemas import (
+    # Auth
+    UserRegister, UserLogin, TokenRefresh, TokenResponse,
     UserCreate, UserResponse,
     InstitutionCreate, InstitutionResponse,
     AccountResponse,
-    TransactionResponse,
+    TransactionResponse, TransactionCategoryUpdate, TransactionListResponse,
+    CategoryResponse,
     SpendingByCategory, SpendingByMerchant,
-    TellerConnectPayload
+    TellerConnectPayload,
+    # User Profile
+    UserProfileCreate, UserProfileUpdate, UserProfileResponse,
+    # Income
+    IncomeSourceCreate, IncomeSourceUpdate, IncomeSourceResponse,
+    IncomeSummary, DetectedIncome,
+    # Goals
+    GoalCreate, GoalUpdate, GoalResponse, GoalSuggestion,
+    # Insights
+    InsightFeedbackUpdate, InsightResponse, DailyInsightsResponse, InsightHistory
 )
 
 __all__ = [
+    # Auth
+    "UserRegister", "UserLogin", "TokenRefresh", "TokenResponse",
     "UserCreate", "UserResponse",
     "InstitutionCreate", "InstitutionResponse",
     "AccountResponse",
-    "TransactionResponse",
+    "TransactionResponse", "TransactionCategoryUpdate", "TransactionListResponse",
+    "CategoryResponse",
     "SpendingByCategory", "SpendingByMerchant",
-    "TellerConnectPayload"
+    "TellerConnectPayload",
+    # User Profile
+    "UserProfileCreate", "UserProfileUpdate", "UserProfileResponse",
+    # Income
+    "IncomeSourceCreate", "IncomeSourceUpdate", "IncomeSourceResponse",
+    "IncomeSummary", "DetectedIncome",
+    # Goals
+    "GoalCreate", "GoalUpdate", "GoalResponse", "GoalSuggestion",
+    # Insights
+    "InsightFeedbackUpdate", "InsightResponse", "DailyInsightsResponse", "InsightHistory"
 ]

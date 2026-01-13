@@ -54,7 +54,7 @@ export function SpendingVelocity({ velocity }: SpendingVelocityProps) {
         {/* Projections */}
         <div className="pt-3 border-t border-gray-200 space-y-2">
           <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-600">📈 On track to spend:</span>
+            <span className="text-sm text-gray-600">On track to spend:</span>
             <span className="font-semibold text-gray-900">
               {formatCurrency(velocity.projected_total)}
             </span>
@@ -76,10 +76,13 @@ export function SpendingVelocity({ velocity }: SpendingVelocityProps) {
 
           {/* Comparison indicator */}
           {Math.abs(velocity.vs_last_month_pct) > 5 && (
-            <div className={`text-sm p-2 rounded-lg ${
+            <div className={`text-sm p-2 rounded-lg flex items-center gap-2 ${
               velocity.vs_last_month > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
             }`}>
-              {velocity.vs_last_month > 0 ? '⬆️' : '⬇️'} {Math.abs(velocity.vs_last_month_pct).toFixed(0)}% vs last month
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={velocity.vs_last_month > 0 ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
+              </svg>
+              {Math.abs(velocity.vs_last_month_pct).toFixed(0)}% vs last month
             </div>
           )}
         </div>

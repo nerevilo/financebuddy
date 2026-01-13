@@ -11,7 +11,8 @@ from datetime import date, timedelta
 from collections import defaultdict
 
 from ..core.database import get_db
-from ..models import Transaction, Account, Institution
+from ..core.auth import get_current_user
+from ..models import Transaction, Account, Institution, User
 from ..schemas import SpendingByCategory, SpendingByMerchant
 from ..services.categorization import TransferDetector
 
@@ -60,7 +61,8 @@ async def get_spending_by_category(
     period: str = Query(default="this_month"),
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get spending breakdown by category.
@@ -76,10 +78,11 @@ async def get_spending_by_category(
     # Initialize transfer detector with database session for account matching
     transfer_detector = TransferDetector(db=db)
 
-    # Get all expense transactions (negative amounts)
+    # Get all expense transactions (negative amounts) for current user
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= start,
             Transaction.date <= end,
             Transaction.amount < 0  # Expenses are negative
@@ -126,7 +129,8 @@ async def get_spending_by_merchant(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     limit: int = Query(default=20, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get top merchants by spending.
@@ -141,10 +145,11 @@ async def get_spending_by_merchant(
     # Initialize transfer detector with database session for account matching
     transfer_detector = TransferDetector(db=db)
 
-    # Get all expense transactions
+    # Get all expense transactions for current user
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= start,
             Transaction.date <= end,
             Transaction.amount < 0
@@ -191,7 +196,8 @@ async def get_spending_by_merchant(
 async def get_spending_trends(
     granularity: str = Query(default="monthly"),  # daily, weekly, monthly
     months: int = Query(default=6, le=24),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Get spending trends over time."""
     start_date = date.today() - timedelta(days=months * 30)
@@ -202,6 +208,7 @@ async def get_spending_trends(
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= start_date
         )
     ).all()
@@ -244,7 +251,8 @@ async def get_spending_trends(
 @router.get("/comparison")
 async def get_period_comparison(
     current_period: str = Query(default="this_month"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Compare spending between current and previous period."""
     current_start, current_end = get_date_range(current_period)
@@ -257,10 +265,11 @@ async def get_period_comparison(
     previous_end = current_start - timedelta(days=1)
     previous_start = previous_end - timedelta(days=period_length)
 
-    # Get current period transactions
+    # Get current period transactions for current user
     current_all_txs = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= current_start,
             Transaction.date <= current_end,
             Transaction.amount < 0
@@ -271,10 +280,11 @@ async def get_period_comparison(
     current_spending_filtered = [tx for tx in current_all_txs if not transfer_detector.is_transfer(tx)]
     current_spending = sum(abs(tx.amount) for tx in current_spending_filtered)
 
-    # Get previous period transactions
+    # Get previous period transactions for current user
     previous_all_txs = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= previous_start,
             Transaction.date <= previous_end,
             Transaction.amount < 0
@@ -296,6 +306,7 @@ async def get_period_comparison(
     current_txs = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= current_start,
             Transaction.date <= current_end,
             Transaction.amount < 0
@@ -314,6 +325,7 @@ async def get_period_comparison(
     previous_txs = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= previous_start,
             Transaction.date <= previous_end,
             Transaction.amount < 0
@@ -360,7 +372,8 @@ async def get_period_comparison(
 @router.get("/income-expenses")
 async def get_income_expenses(
     period: str = Query(default="this_month"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Get income vs expenses summary."""
     start, end = get_date_range(period)
@@ -371,6 +384,7 @@ async def get_income_expenses(
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
+            Institution.user_id == current_user.id,
             Transaction.date >= start,
             Transaction.date <= end
         )
