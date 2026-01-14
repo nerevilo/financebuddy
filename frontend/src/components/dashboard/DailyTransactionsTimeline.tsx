@@ -4,17 +4,6 @@ import { useState, useEffect } from 'react';
 import { useTransactionsByPeriod } from '@/lib/hooks';
 import { TransactionDetailModal } from '../transactions/TransactionDetailModal';
 
-interface TransactionForModal {
-  id: string;
-  merchant: string | null;
-  category: string | null;
-  amount: number;
-  description: string;
-  date?: string;
-  time?: string;
-  emoji?: string;
-}
-
 interface DailyTransactionsTimelineProps {
   period: 'day' | 'week' | 'month';
 }
@@ -22,8 +11,7 @@ interface DailyTransactionsTimelineProps {
 export function DailyTransactionsTimeline({ period }: DailyTransactionsTimelineProps) {
   const { transactions: data, isLoading } = useTransactionsByPeriod(period);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
-  const [selectedTransaction, setSelectedTransaction] = useState<TransactionForModal | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
 
   // Auto-expand first day when data loads
   useEffect(() => {
@@ -119,17 +107,7 @@ export function DailyTransactionsTimeline({ period }: DailyTransactionsTimelineP
                   <button
                     key={index}
                     onClick={() => {
-                      setSelectedTransaction({
-                        id: txn.id,
-                        merchant: txn.merchant,
-                        category: txn.category,
-                        amount: txn.amount,
-                        description: txn.description,
-                        date: day.date,
-                        time: txn.time,
-                        emoji: txn.emoji,
-                      });
-                      setIsModalOpen(true);
+                      setSelectedTransactionId(txn.id);
                     }}
                     className="w-full flex items-center justify-between px-4 py-3 border-b border-gray-100 last:border-0 hover:bg-white transition text-left"
                   >
@@ -165,11 +143,10 @@ export function DailyTransactionsTimeline({ period }: DailyTransactionsTimelineP
 
       {/* Transaction Edit Modal */}
       <TransactionDetailModal
-        transaction={selectedTransaction}
-        isOpen={isModalOpen}
+        transactionId={selectedTransactionId}
+        isOpen={!!selectedTransactionId}
         onClose={() => {
-          setIsModalOpen(false);
-          setSelectedTransaction(null);
+          setSelectedTransactionId(null);
         }}
       />
     </div>

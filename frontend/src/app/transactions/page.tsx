@@ -1,19 +1,28 @@
 'use client';
 
+import { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { InstitutionSidebar } from '@/components/dashboard/InstitutionSidebar';
 import { TransactionsTable } from '@/components/transactions/TransactionsTable';
 import { refreshAllData } from '@/lib/hooks';
 import { ProtectedRoute } from '@/lib/auth';
 import Link from 'next/link';
 
+function TransactionsTableWithParams() {
+  const searchParams = useSearchParams();
+  const showUnusualOnly = searchParams.get('unusual') === 'true';
+
+  return <TransactionsTable initialShowUnusualOnly={showUnusualOnly} />;
+}
+
 function TransactionsContent() {
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50">
       {/* Sidebar */}
       <InstitutionSidebar onDataChange={refreshAllData} />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="ml-72 flex flex-col min-h-screen">
         {/* Header */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="px-6 py-4">
@@ -44,8 +53,35 @@ function TransactionsContent() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6">
-          <TransactionsTable />
+          <Suspense fallback={<TransactionsTableSkeleton />}>
+            <TransactionsTableWithParams />
+          </Suspense>
         </main>
+      </div>
+    </div>
+  );
+}
+
+function TransactionsTableSkeleton() {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-pulse">
+      <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center gap-4">
+          <div className="h-4 w-24 bg-gray-200 rounded"></div>
+          <div className="h-8 w-32 bg-gray-200 rounded-lg"></div>
+          <div className="h-8 w-32 bg-gray-200 rounded-lg"></div>
+        </div>
+      </div>
+      <div className="divide-y divide-gray-200">
+        {[...Array(10)].map((_, i) => (
+          <div key={i} className="px-6 py-4 flex items-center gap-6">
+            <div className="h-4 w-24 bg-gray-200 rounded"></div>
+            <div className="h-4 w-48 bg-gray-200 rounded"></div>
+            <div className="h-4 w-32 bg-gray-200 rounded"></div>
+            <div className="h-4 w-24 bg-gray-200 rounded"></div>
+            <div className="h-4 w-16 bg-gray-200 rounded ml-auto"></div>
+          </div>
+        ))}
       </div>
     </div>
   );

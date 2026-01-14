@@ -1,39 +1,69 @@
 'use client';
 
+import { useState } from 'react';
 import { AccountsSummary } from '@/components/dashboard';
 import { CategoryBreakdownWidget } from '@/components/dashboard/CategoryBreakdownWidget';
 import { TopMerchantsWidget } from '@/components/dashboard/TopMerchantsWidget';
 import { DailyTransactionsTimeline } from '@/components/dashboard/DailyTransactionsTimeline';
 import { InstitutionSidebar } from '@/components/dashboard/InstitutionSidebar';
 import { SpendingTrendChart } from '@/components/dashboard/SpendingTrendChart';
-import { UnusualTransactionsWidget } from '@/components/dashboard/UnusualTransactionsWidget';
-import { useDashboard, useUnusualTransactions } from '@/lib/hooks';
+import { UnusualTransactionsBadge } from '@/components/dashboard/UnusualTransactionsBadge';
+import { GoalsWidget, GoalSuggestionsCard, GoalSettingModal } from '@/components/goals';
+import { BudgetOverviewWidget, BudgetSettingModal, useBudgetSettings } from '@/components/budget';
+import { InsightsWidget } from '@/components/insights';
+import { useDashboard, useUnusualTransactions, useGoals } from '@/lib/hooks';
 import { formatCurrency } from '@/lib/utils';
 import { ProtectedRoute, useAuth } from '@/lib/auth';
+import { GoalCreate } from '@/lib/api';
 
 function DashboardContent() {
   const { accounts, balanceSummary, incomeExpenses, dashboardData, isLoading, error, refresh } = useDashboard();
   const { user, logout } = useAuth();
-  const {
-    transactions: unusualTransactions,
-    totalUnreviewed,
-    markAsOneTime,
-    markAsNormal,
-    refresh: refreshAnomalies
-  } = useUnusualTransactions(5);
+  const { totalUnreviewed } = useUnusualTransactions(1);
+  const { createGoal } = useGoals();
+  const { settings: budgetSettings, saveSettings: saveBudgetSettings } = useBudgetSettings();
+
+  // Modal states for quick actions from insights
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
 
   const hasAccounts = accounts.length > 0;
 
   // Show skeleton instead of spinner when we have cached data
   const showSkeleton = isLoading && !balanceSummary;
 
+  // Calculate total spent this month from income/expenses data
+  const totalSpentThisMonth = incomeExpenses?.total_expenses || 0;
+
+  // Get category spending for budget widget
+  const categorySpending = dashboardData?.categories?.map((cat: any) => ({
+    category: cat.category,
+    amount: cat.amount,
+  })) || [];
+
+  // Handle goal creation from insight quick action
+  const handleCreateGoalFromInsight = () => {
+    setIsGoalModalOpen(true);
+  };
+
+  // Handle budget setting from insight quick action
+  const handleSetBudgetFromInsight = () => {
+    setIsBudgetModalOpen(true);
+  };
+
+  // Handle saving a new goal
+  const handleSaveGoal = async (goalData: GoalCreate | import('@/lib/api').GoalUpdate) => {
+    // When creating from insights, we only create new goals
+    await createGoal(goalData as GoalCreate);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50">
       {/* Sidebar */}
       <InstitutionSidebar onDataChange={refresh} />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="ml-72 flex flex-col min-h-screen">
         {/* Header */}
         <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
           <div className="px-6 py-4">
@@ -130,23 +160,35 @@ function DashboardContent() {
           ) : (
             /* Dashboard Content */
             <div className="space-y-6 max-w-6xl">
+              {/* AI Insights - Prominent at top */}
+              <InsightsWidget
+                onCreateGoal={handleCreateGoalFromInsight}
+                onSetBudget={handleSetBudgetFromInsight}
+              />
+
               {/* Spending Trend Chart - Hero visualization */}
               {dashboardData?.spending_trend && (
                 <SpendingTrendChart trend={dashboardData.spending_trend} />
               )}
 
-              {/* Unusual Transactions Alert */}
-              {unusualTransactions.length > 0 && (
-                <UnusualTransactionsWidget
-                  transactions={unusualTransactions}
-                  totalUnreviewed={totalUnreviewed}
-                  onMarkOneTime={markAsOneTime}
-                  onMarkNormal={markAsNormal}
-                  onRefresh={() => {
-                    refreshAnomalies();
-                    refresh();
-                  }}
+              {/* Budget & Goals - Two column layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Budget Overview */}
+                <BudgetOverviewWidget
+                  totalSpent={totalSpentThisMonth}
+                  categorySpending={categorySpending}
                 />
+
+                {/* Goals */}
+                <GoalsWidget />
+              </div>
+
+              {/* Goal Suggestions from AI */}
+              <GoalSuggestionsCard />
+
+              {/* Unusual Transactions Alert - links to transactions page */}
+              {totalUnreviewed > 0 && (
+                <UnusualTransactionsBadge count={totalUnreviewed} />
               )}
 
               {/* Category Breakdown */}
@@ -175,6 +217,22 @@ function DashboardContent() {
               )}
             </div>
           )}
+
+          {/* Modals for quick actions from Insights */}
+          <GoalSettingModal
+            isOpen={isGoalModalOpen}
+            onClose={() => setIsGoalModalOpen(false)}
+            onSave={handleSaveGoal}
+          />
+
+          <BudgetSettingModal
+            isOpen={isBudgetModalOpen}
+            onClose={() => setIsBudgetModalOpen(false)}
+            onSave={saveBudgetSettings}
+            currentSettings={budgetSettings}
+            categorySpending={categorySpending}
+          />
+
         </main>
       </div>
     </div>

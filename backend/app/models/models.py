@@ -164,6 +164,47 @@ class Transaction(Base):
     # Relationships
     account = relationship("Account", back_populates="transactions")
     category = relationship("Category", back_populates="transactions")
+    tags = relationship("TransactionTag", secondary="transaction_tag_associations", back_populates="transactions")
+
+
+class TransactionTag(Base):
+    """
+    Tags for organizing and classifying transactions.
+
+    Supports both predefined system tags (rent, subscription, etc.)
+    and custom user-created tags.
+    """
+    __tablename__ = "transaction_tags"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=True)  # Hex color for display (e.g., "#3B82F6")
+    tag_type = Column(String, default="custom")  # "predefined" or "custom"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Unique constraint: user can't have duplicate tag names
+    __table_args__ = (
+        Index('ix_transaction_tags_user_name', 'user_id', 'name', unique=True),
+    )
+
+    # Relationships
+    user = relationship("User", backref="transaction_tags")
+    transactions = relationship("Transaction", secondary="transaction_tag_associations", back_populates="tags")
+
+
+class TransactionTagAssociation(Base):
+    """Many-to-many join table for transactions and tags."""
+    __tablename__ = "transaction_tag_associations"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    transaction_id = Column(String, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True)
+    tag_id = Column(String, ForeignKey("transaction_tags.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_transaction_tag_assoc_unique', 'transaction_id', 'tag_id', unique=True),
+    )
 
 
 class TransferRule(Base):

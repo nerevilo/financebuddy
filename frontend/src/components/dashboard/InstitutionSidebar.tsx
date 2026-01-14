@@ -174,7 +174,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
 
   if (loading) {
     return (
-      <aside className="w-72 bg-white border-r border-gray-200 flex flex-col">
+      <aside className="w-72 bg-white border-r border-gray-200 flex flex-col fixed left-0 top-0 h-screen">
         <div className="p-4 border-b border-gray-200">
           <h2 className="font-semibold text-gray-900">Connected Accounts</h2>
         </div>
@@ -186,7 +186,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
   }
 
   return (
-    <aside className="w-72 bg-white border-r border-gray-200 flex flex-col">
+    <aside className="w-72 bg-white border-r border-gray-200 flex flex-col fixed left-0 top-0 h-screen">
       <div className="p-4 border-b border-gray-200">
         <h2 className="font-semibold text-gray-900">Finance Buddy</h2>
       </div>

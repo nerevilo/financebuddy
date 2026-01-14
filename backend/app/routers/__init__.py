@@ -11,6 +11,7 @@ from .income import router as income_router
 from .insights import router as insights_router
 from .profile import router as profile_router
 from .anomalies import router as anomalies_router
+from .tags import router as tags_router
 
 __all__ = [
     "auth_router",
@@ -25,5 +26,6 @@ __all__ = [
     "income_router",
     "insights_router",
     "profile_router",
-    "anomalies_router"
+    "anomalies_router",
+    "tags_router"
 ]

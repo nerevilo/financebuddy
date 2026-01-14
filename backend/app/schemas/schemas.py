@@ -408,3 +408,71 @@ class AnomalySummary(BaseModel):
     one_time_count: int
     one_time_total: float
     top_unreviewed: List[AnomalyResponse]
+
+
+# ==================== Tag Schemas ====================
+
+class TagCreate(BaseModel):
+    """Request body for creating a tag."""
+    name: str
+    color: Optional[str] = None
+
+
+class TagResponse(BaseModel):
+    """Response containing tag information."""
+    id: str
+    name: str
+    color: Optional[str]
+    tag_type: str  # "predefined" or "custom"
+
+    class Config:
+        from_attributes = True
+
+
+class TagsListResponse(BaseModel):
+    """Response containing all tags for a user."""
+    predefined: List[TagResponse]
+    custom: List[TagResponse]
+
+
+# ==================== Extended Transaction Schemas ====================
+
+class TransactionDetailResponse(BaseModel):
+    """Extended transaction response with tags and anomaly info."""
+    id: str
+    account_id: str
+    date: date
+    amount: float
+    description: str
+    merchant_name: Optional[str]
+    category: Optional[str]
+    type: Optional[str]
+    status: str
+    # Anomaly fields
+    is_anomaly: bool = False
+    anomaly_score: Optional[float] = None
+    anomaly_reason: Optional[str] = None
+    is_one_time: bool = False
+    user_reviewed: bool = False
+    # Tags
+    tags: List[TagResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class TransactionUpdateRequest(BaseModel):
+    """Request body for updating a transaction."""
+    merchant_name: Optional[str] = None
+    category: Optional[str] = None
+    tag_ids: Optional[List[str]] = None
+
+
+class TransactionListWithAnomaliesResponse(BaseModel):
+    """Extended transaction list response with anomaly count."""
+    transactions: List[TransactionDetailResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    anomaly_count: int  # Count of unusual transactions in current filter

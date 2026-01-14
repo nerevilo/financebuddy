@@ -5,3 +5,5 @@ export { Badge, badgeVariants } from './Badge';
 export type { BadgeProps } from './Badge';
 
 export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from './Card';
+
+export { TagBadge } from './TagBadge';

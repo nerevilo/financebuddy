@@ -16,7 +16,11 @@ from .schemas import (
     # Goals
     GoalCreate, GoalUpdate, GoalResponse, GoalSuggestion,
     # Insights
-    InsightFeedbackUpdate, InsightResponse, DailyInsightsResponse, InsightHistory
+    InsightFeedbackUpdate, InsightResponse, DailyInsightsResponse, InsightHistory,
+    # Tags
+    TagCreate, TagResponse, TagsListResponse,
+    # Extended Transactions
+    TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse
 )
 
 __all__ = [
@@ -37,5 +41,9 @@ __all__ = [
     # Goals
     "GoalCreate", "GoalUpdate", "GoalResponse", "GoalSuggestion",
     # Insights
-    "InsightFeedbackUpdate", "InsightResponse", "DailyInsightsResponse", "InsightHistory"
+    "InsightFeedbackUpdate", "InsightResponse", "DailyInsightsResponse", "InsightHistory",
+    # Tags
+    "TagCreate", "TagResponse", "TagsListResponse",
+    # Extended Transactions
+    "TransactionDetailResponse", "TransactionUpdateRequest", "TransactionListWithAnomaliesResponse"
 ]

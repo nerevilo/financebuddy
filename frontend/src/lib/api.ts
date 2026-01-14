@@ -190,6 +190,42 @@ export interface TransactionListParams {
   sort_order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
+  show_unusual_only?: boolean;
+  tag_ids?: string[];
+}
+
+// ==================== Tag types ====================
+
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  tag_type: 'predefined' | 'custom';
+}
+
+export interface TagsListResponse {
+  predefined: Tag[];
+  custom: Tag[];
+}
+
+// ==================== Extended Transaction types ====================
+
+export interface TransactionDetail extends Transaction {
+  is_anomaly: boolean;
+  anomaly_score: number | null;
+  anomaly_reason: string | null;
+  is_one_time: boolean;
+  user_reviewed: boolean;
+  tags: Tag[];
+}
+
+export interface TransactionListWithAnomaliesResponse {
+  transactions: TransactionDetail[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  anomaly_count: number;
 }
 
 export const getTransactionsList = (params?: TransactionListParams) => {
@@ -202,10 +238,55 @@ export const getTransactionsList = (params?: TransactionListParams) => {
   if (params?.sort_order) searchParams.set('sort_order', params.sort_order);
   if (params?.limit) searchParams.set('limit', params.limit.toString());
   if (params?.offset) searchParams.set('offset', params.offset.toString());
+  if (params?.show_unusual_only) searchParams.set('show_unusual_only', 'true');
+  if (params?.tag_ids?.length) searchParams.set('tag_ids', params.tag_ids.join(','));
 
   const query = searchParams.toString();
-  return fetchAPI<TransactionListResponse>(`/transactions/list${query ? `?${query}` : ''}`);
+  return fetchAPI<TransactionListWithAnomaliesResponse>(`/transactions/list${query ? `?${query}` : ''}`);
 };
+
+// ==================== Tag endpoints ====================
+
+export const getTags = () => fetchAPI<TagsListResponse>('/tags/');
+
+export const createTag = (name: string, color?: string) =>
+  fetchAPI<Tag>('/tags/', {
+    method: 'POST',
+    body: JSON.stringify({ name, color }),
+  });
+
+export const deleteTag = (tagId: string) =>
+  fetchAPI<{ message: string }>(`/tags/${tagId}`, {
+    method: 'DELETE',
+  });
+
+// ==================== Extended Transaction endpoints ====================
+
+export const getTransactionDetail = (transactionId: string) =>
+  fetchAPI<TransactionDetail>(`/transactions/${transactionId}/detail`);
+
+export const updateTransaction = (
+  transactionId: string,
+  update: {
+    merchant_name?: string;
+    category?: string;
+    tag_ids?: string[];
+  }
+) =>
+  fetchAPI<TransactionDetail>(`/transactions/${transactionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  });
+
+export const addTagToTransaction = (transactionId: string, tagId: string) =>
+  fetchAPI<{ message: string }>(`/transactions/${transactionId}/tags/${tagId}`, {
+    method: 'POST',
+  });
+
+export const removeTagFromTransaction = (transactionId: string, tagId: string) =>
+  fetchAPI<{ message: string }>(`/transactions/${transactionId}/tags/${tagId}`, {
+    method: 'DELETE',
+  });
 
 // ==================== Anomaly Detection endpoints ====================
 
@@ -266,3 +347,151 @@ export const getOneTimeExpenses = (startDate?: string, endDate?: string) => {
   const query = params.toString();
   return fetchAPI<any>(`/anomalies/one-time-expenses${query ? `?${query}` : ''}`);
 };
+
+// ==================== Goals types ====================
+
+export interface Goal {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  target_amount: number;
+  current_amount: number;
+  monthly_allocation: number | null;
+  deadline: string | null;
+  priority: 'high' | 'medium' | 'low';
+  status: 'active' | 'completed' | 'paused' | 'cancelled';
+  auto_suggested: boolean;
+  suggestion_reason: string | null;
+  related_category: string | null;
+  created_at: string;
+  updated_at: string | null;
+  completed_at: string | null;
+  // Computed fields
+  progress_percentage: number | null;
+  months_to_goal: number | null;
+  on_track: boolean | null;
+}
+
+export interface GoalCreate {
+  name: string;
+  description?: string;
+  target_amount: number;
+  current_amount?: number;
+  monthly_allocation?: number;
+  deadline?: string;
+  priority?: 'high' | 'medium' | 'low';
+}
+
+export interface GoalUpdate {
+  name?: string;
+  description?: string;
+  target_amount?: number;
+  current_amount?: number;
+  monthly_allocation?: number;
+  deadline?: string;
+  priority?: 'high' | 'medium' | 'low';
+  status?: 'active' | 'completed' | 'paused' | 'cancelled';
+}
+
+export interface GoalSuggestion {
+  name: string;
+  target_amount: number;
+  monthly_allocation: number;
+  reason: string;
+  related_category: string | null;
+  priority: 'high' | 'medium' | 'low';
+}
+
+// ==================== Goals endpoints ====================
+
+export const getGoals = (status?: string) => {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  const query = params.toString();
+  return fetchAPI<Goal[]>(`/api/goals/${query ? `?${query}` : ''}`);
+};
+
+export const createGoal = (goal: GoalCreate) =>
+  fetchAPI<Goal>('/api/goals/', {
+    method: 'POST',
+    body: JSON.stringify(goal),
+  });
+
+export const getGoal = (goalId: string) =>
+  fetchAPI<Goal>(`/api/goals/${goalId}`);
+
+export const updateGoal = (goalId: string, update: GoalUpdate) =>
+  fetchAPI<Goal>(`/api/goals/${goalId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  });
+
+export const addGoalProgress = (goalId: string, amount: number) =>
+  fetchAPI<Goal>(`/api/goals/${goalId}/progress?amount=${amount}`, {
+    method: 'POST',
+  });
+
+export const deleteGoal = (goalId: string) =>
+  fetchAPI<{ status: string }>(`/api/goals/${goalId}`, {
+    method: 'DELETE',
+  });
+
+export const getGoalSuggestions = () =>
+  fetchAPI<GoalSuggestion[]>('/api/goals/suggestions');
+
+// ==================== Insights types ====================
+
+export interface Insight {
+  id: string;
+  type: 'alert' | 'opportunity' | 'optimization';
+  title: string;
+  description: string;
+  action: string | null;
+  category: string | null;
+  amount_referenced: number | null;
+  comparison_period: string | null;
+  priority_score: number;
+  emoji: string | null;
+  feedback: 'none' | 'helpful' | 'acted_on' | 'dismissed';
+  feedback_at: string | null;
+  generated_at: string;
+  is_read: boolean;
+  expires_at: string | null;
+}
+
+export interface DailyInsightsResponse {
+  date: string;
+  insights: Insight[];
+  generation_source: string;
+  total_cost: number;
+}
+
+// ==================== Insights endpoints ====================
+
+export const getDailyInsights = () =>
+  fetchAPI<DailyInsightsResponse>('/api/insights/daily');
+
+export const getInsightHistory = (limit = 20, offset = 0) =>
+  fetchAPI<{ insights: Insight[]; total: number }>(
+    `/api/insights/history?limit=${limit}&offset=${offset}`
+  );
+
+export const submitInsightFeedback = (
+  insightId: string,
+  feedback: 'helpful' | 'acted_on' | 'dismissed'
+) =>
+  fetchAPI<Insight>(`/api/insights/${insightId}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ feedback }),
+  });
+
+export const markInsightRead = (insightId: string) =>
+  fetchAPI<Insight>(`/api/insights/${insightId}/read`, {
+    method: 'POST',
+  });
+
+export const regenerateInsights = () =>
+  fetchAPI<DailyInsightsResponse>('/api/insights/regenerate', {
+    method: 'POST',
+  });

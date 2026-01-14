@@ -12,8 +12,11 @@ from datetime import date, datetime, timedelta
 from ..core.database import get_db
 from ..core.auth import get_current_user
 from ..core.cache import get_cache, CacheService
-from ..models import Transaction, Account, Institution, User
-from ..schemas import TransactionResponse, TransactionCategoryUpdate, TransactionListResponse, CategoryResponse
+from ..models import Transaction, Account, Institution, User, TransactionTag, TransactionTagAssociation
+from ..schemas import (
+    TransactionResponse, TransactionCategoryUpdate, TransactionListResponse, CategoryResponse,
+    TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse, TagResponse
+)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -173,7 +176,7 @@ async def get_categories(
     ]
 
 
-@router.get("/list", response_model=TransactionListResponse)
+@router.get("/list", response_model=TransactionListWithAnomaliesResponse)
 async def get_transactions_paginated(
     account_id: Optional[str] = None,
     category: Optional[str] = None,
@@ -181,17 +184,21 @@ async def get_transactions_paginated(
     end_date: Optional[date] = None,
     sort_by: Literal["date", "amount", "merchant", "category"] = "date",
     sort_order: Literal["asc", "desc"] = "desc",
+    show_unusual_only: bool = False,
+    tag_ids: Optional[str] = Query(None, description="Comma-separated tag IDs"),
     limit: int = Query(default=50, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get transactions with pagination, sorting, and total count.
+    Get transactions with pagination, sorting, anomaly info, and total count.
 
     - sort_by: Field to sort by (date, amount, merchant, category)
     - sort_order: Sort direction (asc, desc)
-    - Returns total count for pagination UI
+    - show_unusual_only: Filter to show only unusual transactions
+    - tag_ids: Comma-separated list of tag IDs to filter by
+    - Returns total count and anomaly count for UI
     """
     base_query = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
@@ -210,8 +217,25 @@ async def get_transactions_paginated(
     if end_date:
         base_query = base_query.filter(Transaction.date <= end_date)
 
-    # Get total count before pagination
+    # Filter by unusual only
+    if show_unusual_only:
+        base_query = base_query.filter(
+            and_(Transaction.is_anomaly == True, Transaction.user_reviewed == False)
+        )
+
+    # Filter by tags (transactions that have any of the specified tags)
+    if tag_ids:
+        tag_id_list = [tid.strip() for tid in tag_ids.split(",") if tid.strip()]
+        if tag_id_list:
+            base_query = base_query.join(TransactionTagAssociation).filter(
+                TransactionTagAssociation.tag_id.in_(tag_id_list)
+            ).distinct()
+
+    # Get total count and anomaly count before pagination
     total = base_query.count()
+    anomaly_count = base_query.filter(
+        and_(Transaction.is_anomaly == True, Transaction.user_reviewed == False)
+    ).count() if not show_unusual_only else total
 
     # Apply sorting
     sort_column = {
@@ -227,9 +251,9 @@ async def get_transactions_paginated(
     # Apply pagination
     transactions = base_query.offset(offset).limit(limit).all()
 
-    return TransactionListResponse(
+    return TransactionListWithAnomaliesResponse(
         transactions=[
-            TransactionResponse(
+            TransactionDetailResponse(
                 id=tx.id,
                 account_id=tx.account_id,
                 date=tx.date,
@@ -238,14 +262,28 @@ async def get_transactions_paginated(
                 merchant_name=tx.enriched_merchant or tx.merchant_name,
                 category=tx.enriched_category or tx.teller_category,
                 type=tx.type,
-                status=tx.status
+                status=tx.status,
+                is_anomaly=tx.is_anomaly or False,
+                anomaly_score=tx.anomaly_score,
+                anomaly_reason=tx.anomaly_reason,
+                is_one_time=tx.is_one_time or False,
+                user_reviewed=tx.user_reviewed or False,
+                tags=[
+                    TagResponse(
+                        id=tag.id,
+                        name=tag.name,
+                        color=tag.color,
+                        tag_type=tag.tag_type
+                    ) for tag in tx.tags
+                ]
             )
             for tx in transactions
         ],
         total=total,
         limit=limit,
         offset=offset,
-        has_more=(offset + limit) < total
+        has_more=(offset + limit) < total,
+        anomaly_count=anomaly_count
     )
 
 
@@ -325,3 +363,212 @@ async def update_transaction_category(
         type=tx.type,
         status=tx.status
     )
+
+
+@router.get("/{transaction_id}/detail", response_model=TransactionDetailResponse)
+async def get_transaction_detail(
+    transaction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get full transaction details including tags and anomaly info.
+    """
+    tx = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
+    ).first()
+
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    return TransactionDetailResponse(
+        id=tx.id,
+        account_id=tx.account_id,
+        date=tx.date,
+        amount=tx.amount,
+        description=tx.description,
+        merchant_name=tx.enriched_merchant or tx.merchant_name,
+        category=tx.enriched_category or tx.teller_category,
+        type=tx.type,
+        status=tx.status,
+        is_anomaly=tx.is_anomaly or False,
+        anomaly_score=tx.anomaly_score,
+        anomaly_reason=tx.anomaly_reason,
+        is_one_time=tx.is_one_time or False,
+        user_reviewed=tx.user_reviewed or False,
+        tags=[
+            TagResponse(
+                id=tag.id,
+                name=tag.name,
+                color=tag.color,
+                tag_type=tag.tag_type
+            ) for tag in tx.tags
+        ]
+    )
+
+
+@router.patch("/{transaction_id}", response_model=TransactionDetailResponse)
+async def update_transaction(
+    transaction_id: str,
+    update: TransactionUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    cache: CacheService = Depends(get_cache)
+):
+    """
+    Update a transaction's merchant name, category, and/or tags.
+    """
+    tx = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
+    ).first()
+
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Update merchant name if provided
+    if update.merchant_name is not None:
+        tx.enriched_merchant = update.merchant_name
+        tx.enriched_at = datetime.utcnow()
+
+    # Update category if provided
+    if update.category is not None:
+        tx.enriched_category = update.category
+        tx.categorization_source = "user"
+        tx.categorization_confidence = 1.0
+        tx.enriched_at = datetime.utcnow()
+
+    # Update tags if provided
+    if update.tag_ids is not None:
+        # Verify all tags belong to the user
+        tags = db.query(TransactionTag).filter(
+            and_(
+                TransactionTag.id.in_(update.tag_ids),
+                TransactionTag.user_id == current_user.id
+            )
+        ).all()
+
+        if len(tags) != len(update.tag_ids):
+            raise HTTPException(status_code=400, detail="One or more invalid tag IDs")
+
+        # Replace all tags
+        tx.tags = tags
+
+    db.commit()
+    db.refresh(tx)
+
+    # Invalidate dashboard cache
+    await cache.invalidate_user_dashboard(current_user.id)
+
+    return TransactionDetailResponse(
+        id=tx.id,
+        account_id=tx.account_id,
+        date=tx.date,
+        amount=tx.amount,
+        description=tx.description,
+        merchant_name=tx.enriched_merchant or tx.merchant_name,
+        category=tx.enriched_category or tx.teller_category,
+        type=tx.type,
+        status=tx.status,
+        is_anomaly=tx.is_anomaly or False,
+        anomaly_score=tx.anomaly_score,
+        anomaly_reason=tx.anomaly_reason,
+        is_one_time=tx.is_one_time or False,
+        user_reviewed=tx.user_reviewed or False,
+        tags=[
+            TagResponse(
+                id=tag.id,
+                name=tag.name,
+                color=tag.color,
+                tag_type=tag.tag_type
+            ) for tag in tx.tags
+        ]
+    )
+
+
+@router.post("/{transaction_id}/tags/{tag_id}")
+async def add_tag_to_transaction(
+    transaction_id: str,
+    tag_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Add a tag to a transaction.
+    """
+    # Verify transaction belongs to user
+    tx = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
+    ).first()
+
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Verify tag belongs to user
+    tag = db.query(TransactionTag).filter(
+        and_(
+            TransactionTag.id == tag_id,
+            TransactionTag.user_id == current_user.id
+        )
+    ).first()
+
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+
+    # Check if already associated
+    if tag in tx.tags:
+        return {"message": "Tag already added to transaction"}
+
+    tx.tags.append(tag)
+    db.commit()
+
+    return {"message": "Tag added successfully"}
+
+
+@router.delete("/{transaction_id}/tags/{tag_id}")
+async def remove_tag_from_transaction(
+    transaction_id: str,
+    tag_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Remove a tag from a transaction.
+    """
+    # Verify transaction belongs to user
+    tx = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Transaction.id == transaction_id,
+            Institution.user_id == current_user.id
+        )
+    ).first()
+
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Verify tag belongs to user
+    tag = db.query(TransactionTag).filter(
+        and_(
+            TransactionTag.id == tag_id,
+            TransactionTag.user_id == current_user.id
+        )
+    ).first()
+
+    if not tag:
+        raise HTTPException(status_code=404, detail="Tag not found")
+
+    # Remove if present
+    if tag in tx.tags:
+        tx.tags.remove(tag)
+        db.commit()
+        return {"message": "Tag removed successfully"}
+
+    return {"message": "Tag was not on transaction"}

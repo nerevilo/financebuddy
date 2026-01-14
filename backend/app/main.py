@@ -31,7 +31,8 @@ from .routers import (
     income_router,
     insights_router,
     profile_router,
-    anomalies_router
+    anomalies_router,
+    tags_router
 )
 
 # Create database tables
@@ -84,6 +85,7 @@ app.include_router(income_router)
 app.include_router(insights_router)
 app.include_router(profile_router)
 app.include_router(anomalies_router)
+app.include_router(tags_router)
 
 
 @app.get("/")
