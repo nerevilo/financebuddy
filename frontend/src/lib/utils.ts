@@ -25,19 +25,20 @@ export function formatDate(date: string | Date): string {
 }
 
 export function getCategoryColor(category: string): string {
+  // Pastel macaron color palette
   const colors: Record<string, string> = {
-    groceries: '#10B981',
-    dining: '#F59E0B',
-    shopping: '#8B5CF6',
-    entertainment: '#EC4899',
-    transportation: '#3B82F6',
-    utilities: '#6B7280',
-    healthcare: '#EF4444',
-    travel: '#06B6D4',
-    income: '#22C55E',
-    transfer: '#94A3B8',
-    uncategorized: '#D1D5DB',
+    groceries: '#6DB88A',    // Sage mint
+    dining: '#F5CE4D',       // Butter yellow
+    shopping: '#BBA7F2',     // Soft lavender
+    entertainment: '#FFB3B3', // Soft pink
+    transportation: '#A18AE8', // Lavender
+    utilities: '#B3B3AA',    // Warm gray
+    healthcare: '#F07878',   // Soft coral
+    travel: '#8ECCA6',       // Mint
+    income: '#B3DEC2',       // Light sage
+    transfer: '#D9D9D2',     // Light beige
+    uncategorized: '#E8E8E3', // Cream gray
   };
 
-  return colors[category.toLowerCase()] || '#6B7280';
+  return colors[category.toLowerCase()] || '#B3B3AA';
 }

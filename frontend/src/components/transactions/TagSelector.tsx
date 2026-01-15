@@ -67,7 +67,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-lg bg-white hover:border-gray-400 transition-colors text-left"
+        className="w-full flex items-center justify-between px-3 py-2 border border-neutral-300 rounded-lg bg-white hover:border-neutral-400 transition-colors text-left"
       >
         <div className="flex items-center gap-2 flex-wrap min-h-[24px]">
           {selectedTags.length > 0 ? (
@@ -80,7 +80,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
               />
             ))
           ) : (
-            <span className="text-gray-500 text-sm flex items-center gap-1.5">
+            <span className="text-neutral-500 text-sm flex items-center gap-1.5">
               <TagIcon className="w-4 h-4" />
               Select tags...
             </span>
@@ -88,7 +88,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
         </div>
         <ChevronDown
           className={cn(
-            'w-4 h-4 text-gray-400 transition-transform',
+            'w-4 h-4 text-neutral-400 transition-transform',
             isOpen && 'transform rotate-180'
           )}
         />
@@ -96,11 +96,11 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+        <div className="absolute z-50 mt-1 w-full bg-white border border-neutral-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
           {/* Predefined tags section */}
           {predefinedTags.length > 0 && (
             <>
-              <div className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 border-b border-gray-100">
+              <div className="px-3 py-1.5 text-xs font-medium text-neutral-500 bg-cream-50 border-b border-neutral-100">
                 Quick Tags
               </div>
               {predefinedTags.map((tag) => (
@@ -117,7 +117,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
           {/* Custom tags section */}
           {customTags.length > 0 && (
             <>
-              <div className="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 border-b border-gray-100">
+              <div className="px-3 py-1.5 text-xs font-medium text-neutral-500 bg-cream-50 border-b border-neutral-100">
                 Custom Tags
               </div>
               {customTags.map((tag) => (
@@ -132,7 +132,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
           )}
 
           {/* Create new tag */}
-          <div className="border-t border-gray-100">
+          <div className="border-t border-neutral-100">
             {isCreating ? (
               <div className="p-2">
                 <div className="flex gap-2">
@@ -141,7 +141,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
                     value={newTagName}
                     onChange={(e) => setNewTagName(e.target.value)}
                     placeholder="Tag name..."
-                    className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-2 py-1.5 text-sm border border-neutral-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-400"
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleCreateTag();
@@ -154,7 +154,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
                   <button
                     onClick={handleCreateTag}
                     disabled={!newTagName.trim() || isSubmitting}
-                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-3 py-1.5 text-sm bg-primary-500 text-white rounded hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Add
                   </button>
@@ -163,7 +163,7 @@ export function TagSelector({ selectedTagIds, onChange, className }: TagSelector
             ) : (
               <button
                 onClick={() => setIsCreating(true)}
-                className="w-full px-3 py-2 flex items-center gap-2 text-sm text-blue-600 hover:bg-blue-50 transition-colors"
+                className="w-full px-3 py-2 flex items-center gap-2 text-sm text-primary-600 hover:bg-primary-50 transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Create new tag
@@ -188,16 +188,16 @@ function TagOption({
   return (
     <button
       onClick={onClick}
-      className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 transition-colors"
+      className="w-full px-3 py-2 flex items-center justify-between hover:bg-cream-50 transition-colors"
     >
       <div className="flex items-center gap-2">
         <span
           className="w-3 h-3 rounded-full"
           style={{ backgroundColor: tag.color || '#9CA3AF' }}
         />
-        <span className="text-sm text-gray-700">{tag.name}</span>
+        <span className="text-sm text-neutral-700">{tag.name}</span>
       </div>
-      {isSelected && <Check className="w-4 h-4 text-blue-600" />}
+      {isSelected && <Check className="w-4 h-4 text-primary-600" />}
     </button>
   );
 }

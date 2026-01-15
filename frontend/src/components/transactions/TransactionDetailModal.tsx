@@ -163,19 +163,19 @@ export function TransactionDetailModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="flex items-center justify-between p-6 border-b border-neutral-200">
           <div className="flex items-center gap-3">
             <span className="text-3xl">
               {transaction?.amount && transaction.amount < 0 ? '💸' : '💰'}
             </span>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Transaction Details</h2>
-              <p className="text-gray-500 text-sm">Edit details, category, and tags</p>
+              <h2 className="text-xl font-bold text-neutral-900">Transaction Details</h2>
+              <p className="text-neutral-500 text-sm">Edit details, category, and tags</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition"
+            className="text-neutral-400 hover:text-neutral-600 transition"
           >
             <X className="w-6 h-6" />
           </button>
@@ -185,28 +185,28 @@ export function TransactionDetailModal({
         <div className="p-6 space-y-5 overflow-y-auto flex-1">
           {isLoading ? (
             <div className="space-y-4">
-              <div className="h-20 bg-gray-100 rounded-xl animate-pulse"></div>
-              <div className="h-12 bg-gray-100 rounded-lg animate-pulse"></div>
-              <div className="h-12 bg-gray-100 rounded-lg animate-pulse"></div>
+              <div className="h-20 bg-neutral-100 rounded-xl animate-pulse"></div>
+              <div className="h-12 bg-neutral-100 rounded-lg animate-pulse"></div>
+              <div className="h-12 bg-neutral-100 rounded-lg animate-pulse"></div>
             </div>
           ) : transaction ? (
             <>
               {/* Transaction Summary */}
-              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+              <div className="bg-cream-50 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between items-start">
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-lg truncate">
+                    <div className="font-semibold text-neutral-900 text-lg truncate">
                       {transaction.merchant_name || 'Unknown Merchant'}
                     </div>
-                    <div className="text-sm text-gray-500 truncate" title={transaction.description}>
+                    <div className="text-sm text-neutral-500 truncate" title={transaction.description}>
                       {transaction.description}
                     </div>
                   </div>
                   <div className="text-right ml-4">
-                    <div className={`font-bold text-xl ${transaction.amount < 0 ? 'text-gray-900' : 'text-green-600'}`}>
+                    <div className={`font-bold text-xl ${transaction.amount < 0 ? 'text-neutral-900' : 'text-success-500'}`}>
                       {transaction.amount < 0 ? '-' : '+'}{formatCurrency(transaction.amount)}
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-neutral-500">
                       {formatDate(transaction.date)}
                     </div>
                   </div>
@@ -214,7 +214,7 @@ export function TransactionDetailModal({
 
                 {/* Current tags display */}
                 {transaction.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-2 border-t border-gray-200 mt-2">
+                  <div className="flex flex-wrap gap-1 pt-2 border-t border-neutral-200 mt-2">
                     {transaction.tags.map((tag) => (
                       <TagBadge key={tag.id} tag={tag} size="sm" />
                     ))}
@@ -224,21 +224,21 @@ export function TransactionDetailModal({
 
               {/* Anomaly Alert */}
               {transaction.is_anomaly && !transaction.user_reviewed && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="bg-warning-50 border border-warning-200 rounded-xl p-4">
                   <div className="flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <AlertTriangle className="w-5 h-5 text-warning-600 flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
-                      <div className="font-medium text-amber-800">
+                      <div className="font-medium text-warning-700">
                         Flagged as Unusual
                       </div>
-                      <div className="text-sm text-amber-700 mt-1">
+                      <div className="text-sm text-warning-700 mt-1">
                         <UnusualBadge anomalyReason={transaction.anomaly_reason} size="sm" />
                       </div>
                       <div className="flex gap-2 mt-3">
                         <button
                           onClick={handleMarkOneTime}
                           disabled={isMarkingAnomaly}
-                          className="px-3 py-1.5 text-sm font-medium bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 transition disabled:opacity-50"
+                          className="px-3 py-1.5 text-sm font-medium bg-warning-100 text-warning-700 rounded-lg hover:bg-warning-200 transition disabled:opacity-50"
                         >
                           <Clock className="w-4 h-4 inline mr-1" />
                           One-Time
@@ -246,7 +246,7 @@ export function TransactionDetailModal({
                         <button
                           onClick={handleMarkNormal}
                           disabled={isMarkingAnomaly}
-                          className="px-3 py-1.5 text-sm font-medium bg-green-100 text-green-800 rounded-lg hover:bg-green-200 transition disabled:opacity-50"
+                          className="px-3 py-1.5 text-sm font-medium bg-success-100 text-success-700 rounded-lg hover:bg-success-200 transition disabled:opacity-50"
                         >
                           <CheckCircle className="w-4 h-4 inline mr-1" />
                           Normal
@@ -259,9 +259,9 @@ export function TransactionDetailModal({
 
               {/* Reviewed status */}
               {transaction.is_anomaly && transaction.user_reviewed && (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="text-sm text-green-800">
+                <div className="bg-success-50 border border-success-200 rounded-xl p-3 flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-success-500" />
+                  <span className="text-sm text-success-700">
                     Reviewed - marked as {transaction.is_one_time ? 'one-time expense' : 'normal'}
                   </span>
                 </div>
@@ -269,7 +269,7 @@ export function TransactionDetailModal({
 
               {/* Merchant Name */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-neutral-700 mb-2">
                   Merchant Name
                 </label>
                 <input
@@ -277,22 +277,22 @@ export function TransactionDetailModal({
                   value={merchantName}
                   onChange={(e) => setMerchantName(e.target.value)}
                   placeholder="Enter merchant name"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full px-4 py-2.5 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-primary-400 focus:border-primary-400"
                 />
               </div>
 
               {/* Category */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-neutral-700 mb-2">
                   Category
                 </label>
                 {categoriesLoading ? (
-                  <div className="h-10 bg-gray-100 rounded-lg animate-pulse"></div>
+                  <div className="h-10 bg-neutral-100 rounded-lg animate-pulse"></div>
                 ) : (
                   <select
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    className="w-full px-4 py-2.5 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-primary-400 focus:border-primary-400 bg-white"
                   >
                     <option value="">Select a category</option>
                     {categories.map((cat) => (
@@ -306,7 +306,7 @@ export function TransactionDetailModal({
 
               {/* Tags */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-neutral-700 mb-2">
                   Tags
                 </label>
                 <TagSelector
@@ -317,23 +317,23 @@ export function TransactionDetailModal({
 
               {/* Error Message */}
               {error && (
-                <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg text-sm">
+                <div className="bg-danger-50 text-danger-500 px-4 py-2 rounded-lg text-sm">
                   {error}
                 </div>
               )}
             </>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-neutral-500">
               Transaction not found
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-neutral-200 bg-cream-50">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 hover:text-gray-900 font-medium transition"
+            className="px-4 py-2 text-neutral-700 hover:text-neutral-900 font-medium transition"
           >
             Cancel
           </button>
@@ -342,8 +342,8 @@ export function TransactionDetailModal({
             disabled={!hasChanges || isSaving}
             className={`px-6 py-2 rounded-lg font-medium transition ${
               hasChanges && !isSaving
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                ? 'bg-primary-500 text-white hover:bg-primary-600'
+                : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
             }`}
           >
             {isSaving ? (

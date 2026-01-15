@@ -39,8 +39,8 @@ export function SpendingChart({ categories, totalSpending }: SpendingChartProps)
   });
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Spending by Category</h3>
+    <div className="bg-white rounded-xl shadow-sm border border-neutral-200 p-6">
+      <h3 className="text-lg font-semibold text-neutral-900 mb-4">Spending by Category</h3>
 
       <div className="flex flex-col lg:flex-row items-center gap-6">
         <div className="w-full lg:w-1/2">
@@ -64,22 +64,22 @@ export function SpendingChart({ categories, totalSpending }: SpendingChartProps)
                     className="w-3 h-3 rounded-full"
                     style={{ backgroundColor: getCategoryColor(cat.category) }}
                   />
-                  <span className="text-sm text-gray-600 capitalize">{cat.category}</span>
+                  <span className="text-sm text-neutral-600 capitalize">{cat.category}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-neutral-900">
                     {formatCurrency(cat.total)}
                   </span>
-                  <span className="text-xs text-gray-500 ml-2">({cat.percentage}%)</span>
+                  <span className="text-xs text-neutral-500 ml-2">({cat.percentage}%)</span>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="mt-4 pt-4 border-t border-gray-100">
+          <div className="mt-4 pt-4 border-t border-neutral-100">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-600">Total Spending</span>
-              <span className="text-lg font-bold text-gray-900">
+              <span className="text-sm font-medium text-neutral-600">Total Spending</span>
+              <span className="text-lg font-bold text-neutral-900">
                 {formatCurrency(totalSpending)}
               </span>
             </div>

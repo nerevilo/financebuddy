@@ -22,21 +22,21 @@ export function RecentTransactionsWidget({ transactions }: RecentTransactionsWid
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Transactions</h3>
+    <div className="bg-white rounded-xl shadow-sm border border-neutral-200 p-6">
+      <h3 className="text-lg font-semibold text-neutral-900 mb-4">Recent Transactions</h3>
 
       <div className="space-y-3">
         {transactions.slice(0, 5).map((txn, index) => (
-          <div key={index} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+          <div key={index} className="flex items-center justify-between py-2 border-b border-neutral-100 last:border-0">
             <div className="flex items-center gap-3 flex-1">
               <span className="text-2xl">{txn.emoji}</span>
               <div>
-                <div className="font-medium text-gray-900 text-sm">{txn.merchant}</div>
-                <div className="text-xs text-gray-500">{formatDate(txn.date)}</div>
+                <div className="font-medium text-neutral-900 text-sm">{txn.merchant}</div>
+                <div className="text-xs text-neutral-500">{formatDate(txn.date)}</div>
               </div>
             </div>
             <div className="text-right">
-              <div className="font-semibold text-gray-900 text-sm">
+              <div className="font-semibold text-neutral-900 text-sm">
                 {formatCurrency(txn.amount)}
               </div>
             </div>
@@ -45,7 +45,7 @@ export function RecentTransactionsWidget({ transactions }: RecentTransactionsWid
       </div>
 
       <div className="mt-4 text-center">
-        <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
+        <button className="text-sm text-primary-600 hover:text-primary-700 font-medium">
           View All Transactions →
         </button>
       </div>

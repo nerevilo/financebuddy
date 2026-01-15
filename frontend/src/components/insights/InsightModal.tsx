@@ -48,43 +48,43 @@ export function InsightModal({
     switch (insight.type) {
       case 'alert':
         return {
-          bg: 'bg-red-50',
-          border: 'border-red-200',
-          iconBg: 'bg-red-100',
-          iconColor: 'text-red-600',
-          headerBg: 'bg-gradient-to-r from-red-500 to-red-600',
-          accentColor: 'text-red-600',
-          buttonBg: 'bg-red-600 hover:bg-red-700',
+          bg: 'bg-danger-50',
+          border: 'border-danger-200',
+          iconBg: 'bg-danger-100',
+          iconColor: 'text-danger-500',
+          headerBg: 'bg-gradient-to-r from-secondary-500 to-secondary-500',
+          accentColor: 'text-danger-500',
+          buttonBg: 'bg-danger-500 hover:bg-danger-600',
         };
       case 'opportunity':
         return {
-          bg: 'bg-green-50',
-          border: 'border-green-200',
-          iconBg: 'bg-green-100',
-          iconColor: 'text-green-600',
-          headerBg: 'bg-gradient-to-r from-green-500 to-emerald-600',
-          accentColor: 'text-green-600',
-          buttonBg: 'bg-green-600 hover:bg-green-700',
+          bg: 'bg-success-50',
+          border: 'border-success-200',
+          iconBg: 'bg-success-100',
+          iconColor: 'text-success-500',
+          headerBg: 'bg-gradient-to-r from-success-500 to-success-500',
+          accentColor: 'text-success-500',
+          buttonBg: 'bg-success-500 hover:bg-success-600',
         };
       case 'optimization':
         return {
-          bg: 'bg-blue-50',
-          border: 'border-blue-200',
-          iconBg: 'bg-blue-100',
-          iconColor: 'text-blue-600',
-          headerBg: 'bg-gradient-to-r from-blue-500 to-indigo-600',
-          accentColor: 'text-blue-600',
-          buttonBg: 'bg-blue-600 hover:bg-blue-700',
+          bg: 'bg-primary-50',
+          border: 'border-primary-200',
+          iconBg: 'bg-primary-100',
+          iconColor: 'text-primary-600',
+          headerBg: 'bg-gradient-to-r from-primary-500 to-primary-500',
+          accentColor: 'text-primary-600',
+          buttonBg: 'bg-primary-500 hover:bg-primary-600',
         };
       default:
         return {
-          bg: 'bg-gray-50',
-          border: 'border-gray-200',
-          iconBg: 'bg-gray-100',
-          iconColor: 'text-gray-600',
-          headerBg: 'bg-gradient-to-r from-gray-500 to-gray-600',
-          accentColor: 'text-gray-600',
-          buttonBg: 'bg-gray-600 hover:bg-gray-700',
+          bg: 'bg-cream-50',
+          border: 'border-neutral-200',
+          iconBg: 'bg-neutral-100',
+          iconColor: 'text-neutral-600',
+          headerBg: 'bg-gradient-to-r from-neutral-400 to-neutral-500',
+          accentColor: 'text-neutral-600',
+          buttonBg: 'bg-neutral-500 hover:bg-neutral-600',
         };
     }
   };
@@ -167,18 +167,18 @@ export function InsightModal({
         <div className="p-6 space-y-5">
           {/* Description */}
           <div>
-            <p className="text-gray-700 leading-relaxed">{insight.description}</p>
+            <p className="text-neutral-700 leading-relaxed">{insight.description}</p>
           </div>
 
           {/* Amount referenced */}
           {insight.amount_referenced && (
             <div className={`${styles.bg} rounded-xl p-4 border ${styles.border}`}>
-              <p className="text-sm text-gray-500 mb-1">Amount</p>
+              <p className="text-sm text-neutral-500 mb-1">Amount</p>
               <p className={`text-2xl font-bold ${styles.accentColor}`}>
                 {formatCurrency(insight.amount_referenced)}
               </p>
               {insight.comparison_period && (
-                <p className="text-sm text-gray-500 mt-1">{insight.comparison_period}</p>
+                <p className="text-sm text-neutral-500 mt-1">{insight.comparison_period}</p>
               )}
             </div>
           )}
@@ -186,8 +186,8 @@ export function InsightModal({
           {/* Category */}
           {insight.category && (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Category:</span>
-              <span className="px-3 py-1 bg-gray-100 rounded-full text-sm font-medium text-gray-700">
+              <span className="text-sm text-neutral-500">Category:</span>
+              <span className="px-3 py-1 bg-neutral-100 rounded-full text-sm font-medium text-neutral-700">
                 {insight.category}
               </span>
             </div>
@@ -195,16 +195,16 @@ export function InsightModal({
 
           {/* Action suggestion */}
           {insight.action && (
-            <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+            <div className="bg-cream-50 rounded-xl p-4 border border-neutral-200">
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0 mt-0.5">
-                  <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center shrink-0 mt-0.5">
+                  <svg className="w-4 h-4 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                   </svg>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-900 mb-1">Suggested Action</p>
-                  <p className="text-gray-600">{insight.action}</p>
+                  <p className="text-sm font-medium text-neutral-900 mb-1">Suggested Action</p>
+                  <p className="text-neutral-600">{insight.action}</p>
                 </div>
               </div>
             </div>
@@ -218,7 +218,7 @@ export function InsightModal({
                   onCreateGoal();
                   onClose();
                 }}
-                className="flex-1 py-2.5 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
+                className="flex-1 py-2.5 px-4 bg-success-500 text-white rounded-lg font-medium hover:bg-success-600 transition flex items-center justify-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -244,9 +244,9 @@ export function InsightModal({
         </div>
 
         {/* Feedback section */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+        <div className="px-6 py-4 bg-cream-50 border-t border-neutral-200">
           {feedbackSubmitted ? (
-            <div className="flex items-center justify-center gap-2 text-green-600">
+            <div className="flex items-center justify-center gap-2 text-success-500">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
@@ -254,14 +254,14 @@ export function InsightModal({
             </div>
           ) : insight.feedback === 'none' ? (
             <div>
-              <p className="text-sm text-gray-600 text-center mb-3">Was this insight helpful?</p>
+              <p className="text-sm text-neutral-600 text-center mb-3">Was this insight helpful?</p>
               <div className="flex justify-center gap-2">
                 <button
                   onClick={() => handleFeedback('helpful')}
                   disabled={isSubmittingFeedback}
-                  className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition flex items-center gap-2"
+                  className="px-4 py-2 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-cream-50 disabled:opacity-50 transition flex items-center gap-2"
                 >
-                  <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-success-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
                   </svg>
                   Helpful
@@ -269,9 +269,9 @@ export function InsightModal({
                 <button
                   onClick={() => handleFeedback('acted_on')}
                   disabled={isSubmittingFeedback}
-                  className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition flex items-center gap-2"
+                  className="px-4 py-2 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-700 hover:bg-cream-50 disabled:opacity-50 transition flex items-center gap-2"
                 >
-                  <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   I'll act on it
@@ -279,21 +279,21 @@ export function InsightModal({
                 <button
                   onClick={() => handleFeedback('dismissed')}
                   disabled={isSubmittingFeedback}
-                  className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 transition"
+                  className="px-4 py-2 bg-white border border-neutral-200 rounded-lg text-sm font-medium text-neutral-500 hover:bg-cream-50 disabled:opacity-50 transition"
                 >
                   Dismiss
                 </button>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-gray-500 text-center">
+            <p className="text-sm text-neutral-500 text-center">
               You marked this as "{insight.feedback}"
             </p>
           )}
         </div>
 
         {/* Meta info */}
-        <div className="px-6 py-3 bg-gray-100 border-t border-gray-200 text-xs text-gray-500 text-center">
+        <div className="px-6 py-3 bg-neutral-100 border-t border-neutral-200 text-xs text-neutral-500 text-center">
           Generated {new Date(insight.generated_at).toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',

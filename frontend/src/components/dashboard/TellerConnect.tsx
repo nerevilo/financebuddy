@@ -80,7 +80,7 @@ export function TellerConnect({ onSuccess }: TellerConnectProps) {
     <button
       onClick={openTellerConnect}
       disabled={!isReady || isLoading}
-      className="inline-flex items-center justify-center gap-2 px-6 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+      className="inline-flex items-center justify-center gap-2 px-6 py-3 text-white bg-primary-500 rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
     >
       {isLoading ? (
         <>

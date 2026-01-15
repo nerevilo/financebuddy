@@ -225,22 +225,24 @@ async def get_transactions_by_period(
 @router.get("/spending-trend")
 async def get_spending_trend(
     budget: float = None,
+    view: str = 'daily',
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     cache: CacheService = Depends(get_cache)
 ) -> Dict:
     """
-    Get daily cumulative spending for trend visualization
+    Get spending trend for visualization with multiple view options
 
     Query params:
-    - budget: Optional budget amount (defaults to last month's total)
+    - budget: Optional budget amount (defaults to last month's total or average)
+    - view: 'daily' (days in month), 'monthly' (past 12 months), 'yearly' (past 5 years)
 
     Returns:
-    - Daily spending data with cumulative totals
-    - Budget pace line
-    - Last month comparison
+    - For daily: Daily spending data with cumulative totals, budget pace, last month comparison
+    - For monthly: Monthly totals for past 12 months with trends
+    - For yearly: Yearly totals for past 5 years with projections
     """
-    cache_key = DashboardCacheKeys.spending_trend(current_user.id, budget)
+    cache_key = f"spending_trend:{current_user.id}:{view}:{budget}"
 
     # Try to get from cache
     cached = await cache.get(cache_key)
@@ -249,7 +251,7 @@ async def get_spending_trend(
 
     # Generate fresh data
     service = DashboardService(db, current_user.id)
-    result = service.get_spending_trend(budget)
+    result = service.get_spending_trend_by_view(view, budget)
 
     # Cache for 5 minutes
     await cache.set(cache_key, result, CacheTTL.DEFAULT)

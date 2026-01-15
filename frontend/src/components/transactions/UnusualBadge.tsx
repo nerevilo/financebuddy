@@ -28,7 +28,7 @@ export function UnusualBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 border border-amber-200',
+        'inline-flex items-center gap-1 rounded-full bg-warning-100 text-warning-700 border border-warning-200',
         size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm',
         className
       )}

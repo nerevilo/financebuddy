@@ -700,5 +700,187 @@ class DashboardService:
             'days_in_month': days_in_month,
             'on_track': current_total <= (daily_budget_pace * now.day * 1.1),  # Within 10%
             'month_name': now.strftime('%B'),
-            'last_month_name': last_month.strftime('%B')
+            'last_month_name': last_month.strftime('%B'),
+            'last_month_total': last_month_total
+        }
+
+    def get_spending_trend_by_view(self, view: str = 'daily', budget: Optional[float] = None) -> Dict:
+        """
+        Get spending trend data based on view type.
+
+        Args:
+            view: 'daily' (days in current month), 'monthly' (past 12 months), 'yearly' (past 5 years)
+            budget: Optional budget amount for reference
+
+        Returns:
+            Spending trend data formatted for the requested view
+        """
+        if view == 'daily':
+            return self.get_spending_trend(budget)
+        elif view == 'monthly':
+            return self._get_monthly_trend(budget)
+        elif view == 'yearly':
+            return self._get_yearly_trend(budget)
+        else:
+            return self.get_spending_trend(budget)
+
+    def _get_monthly_trend(self, budget: Optional[float] = None) -> Dict:
+        """
+        Get monthly spending totals for the past 12 months.
+        Uses a single aggregated query for performance.
+        """
+        now = datetime.now()
+
+        # Calculate date range for past 12 months
+        # Go back 11 months from current month
+        start_month = now.month - 11
+        start_year = now.year
+        while start_month <= 0:
+            start_month += 12
+            start_year -= 1
+        start_date = datetime(start_year, start_month, 1)
+
+        # Single query to get all monthly totals
+        results = self.db.query(
+            extract('year', Transaction.date).label('year'),
+            extract('month', Transaction.date).label('month'),
+            func.sum(func.abs(Transaction.amount)).label('total')
+        ).join(Account, Transaction.account_id == Account.id).join(
+            Institution, Account.institution_id == Institution.id
+        ).filter(
+            and_(
+                Transaction.date >= start_date,
+                Transaction.enriched_merchant.isnot(None),
+                self._is_expense(),
+                self._user_filter()
+            )
+        ).group_by(
+            extract('year', Transaction.date),
+            extract('month', Transaction.date)
+        ).all()
+
+        # Convert results to dict for easy lookup
+        results_dict = {(int(r.year), int(r.month)): float(r.total) for r in results}
+
+        # Build monthly data array for past 12 months
+        monthly_data = []
+        total_spending = 0
+
+        for i in range(11, -1, -1):
+            target_month = now.month - i
+            target_year = now.year
+            while target_month <= 0:
+                target_month += 12
+                target_year -= 1
+
+            month_total = results_dict.get((target_year, target_month), 0)
+            total_spending += month_total
+
+            month_date = datetime(target_year, target_month, 1)
+            monthly_data.append({
+                'period': month_date.strftime('%b %Y'),
+                'short_label': month_date.strftime('%b'),
+                'month': target_month,
+                'year': target_year,
+                'amount': month_total,
+                'is_current': target_year == now.year and target_month == now.month
+            })
+
+        # Calculate average and trends
+        avg_spending = total_spending / 12 if monthly_data else 0
+        current_month = monthly_data[-1]['amount'] if monthly_data else 0
+        last_month = monthly_data[-2]['amount'] if len(monthly_data) >= 2 else 0
+
+        # Calculate budget pace (monthly average or user budget)
+        budget_amount = budget if budget else avg_spending
+
+        return {
+            'view': 'monthly',
+            'data': monthly_data,
+            'total': total_spending,
+            'average': avg_spending,
+            'current': current_month,
+            'previous': last_month,
+            'budget': budget_amount,
+            'change': current_month - last_month,
+            'change_pct': ((current_month - last_month) / last_month * 100) if last_month > 0 else 0,
+            'period_label': 'Last 12 Months'
+        }
+
+    def _get_yearly_trend(self, budget: Optional[float] = None) -> Dict:
+        """
+        Get yearly spending totals for the past 5 years.
+        Uses a single aggregated query for performance.
+        """
+        now = datetime.now()
+        current_year = now.year
+        start_year = current_year - 4
+        start_date = datetime(start_year, 1, 1)
+
+        # Single query to get all yearly totals
+        results = self.db.query(
+            extract('year', Transaction.date).label('year'),
+            func.sum(func.abs(Transaction.amount)).label('total')
+        ).join(Account, Transaction.account_id == Account.id).join(
+            Institution, Account.institution_id == Institution.id
+        ).filter(
+            and_(
+                Transaction.date >= start_date,
+                Transaction.enriched_merchant.isnot(None),
+                self._is_expense(),
+                self._user_filter()
+            )
+        ).group_by(
+            extract('year', Transaction.date)
+        ).all()
+
+        # Convert results to dict for easy lookup
+        results_dict = {int(r.year): float(r.total) for r in results}
+
+        # Build yearly data array
+        yearly_data = []
+        total_spending = 0
+
+        for year in range(start_year, current_year + 1):
+            year_total = results_dict.get(year, 0)
+            total_spending += year_total
+
+            # For current year, project full year
+            if year == current_year:
+                year_start = datetime(year, 1, 1)
+                days_elapsed = (now - year_start).days + 1
+                days_in_year = 366 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 365
+                projected = (year_total / days_elapsed) * days_in_year if days_elapsed > 0 else 0
+            else:
+                projected = None
+
+            yearly_data.append({
+                'period': str(year),
+                'short_label': str(year),
+                'year': year,
+                'amount': year_total,
+                'projected': projected,
+                'is_current': year == current_year
+            })
+
+        # Calculate trends
+        current_year_amount = yearly_data[-1]['amount'] if yearly_data else 0
+        last_year_amount = yearly_data[-2]['amount'] if len(yearly_data) >= 2 else 0
+        avg_spending = total_spending / len(yearly_data) if yearly_data else 0
+
+        # Calculate budget (yearly average or user budget * 12)
+        budget_amount = (budget * 12) if budget else avg_spending
+
+        return {
+            'view': 'yearly',
+            'data': yearly_data,
+            'total': total_spending,
+            'average': avg_spending,
+            'current': current_year_amount,
+            'previous': last_year_amount,
+            'budget': budget_amount,
+            'change': current_year_amount - last_year_amount,
+            'change_pct': ((current_year_amount - last_year_amount) / last_year_amount * 100) if last_year_amount > 0 else 0,
+            'period_label': 'Last 5 Years',
+            'current_year_projected': yearly_data[-1]['projected'] if yearly_data else None
         }

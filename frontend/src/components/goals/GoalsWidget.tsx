@@ -46,31 +46,32 @@ export function GoalsWidget() {
     setIsModalOpen(true);
   };
 
+  // Soft wash priority colors
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'text-red-600 bg-red-50';
-      case 'medium': return 'text-orange-600 bg-orange-50';
-      case 'low': return 'text-green-600 bg-green-50';
-      default: return 'text-gray-600 bg-gray-50';
+      case 'high': return 'text-rose-700 bg-rose-600/10';
+      case 'medium': return 'text-amber-700 bg-amber-500/10';
+      case 'low': return 'text-emerald-700 bg-emerald-500/10';
+      default: return 'text-slate-700 bg-slate-500/10';
     }
   };
 
   const getProgressColor = (percent: number, onTrack: boolean | null) => {
-    if (percent >= 100) return 'bg-green-500';
-    if (onTrack === false) return 'bg-red-500';
-    if (percent >= 75) return 'bg-green-500';
-    if (percent >= 50) return 'bg-blue-500';
-    return 'bg-blue-400';
+    if (percent >= 100) return 'bg-emerald-500';
+    if (onTrack === false) return 'bg-rose-600';
+    if (percent >= 75) return 'bg-emerald-500';
+    if (percent >= 50) return 'bg-slate-700';
+    return 'bg-slate-500';
   };
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-xl shadow border border-slate-200 p-6">
         <div className="animate-pulse">
-          <div className="h-5 w-32 bg-gray-200 rounded mb-4"></div>
+          <div className="h-5 w-32 bg-slate-200 rounded mb-4"></div>
           <div className="space-y-3">
             {[1, 2].map((i) => (
-              <div key={i} className="h-20 bg-gray-100 rounded-lg"></div>
+              <div key={i} className="h-20 bg-slate-100 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -80,18 +81,18 @@ export function GoalsWidget() {
 
   return (
     <>
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow border border-slate-200 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
             </svg>
-            <h2 className="text-lg font-semibold text-gray-900">Financial Goals</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">Financial Goals</h2>
           </div>
           <button
             onClick={openNewGoal}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -104,16 +105,16 @@ export function GoalsWidget() {
         <div className="p-4">
           {goals.length === 0 ? (
             <div className="text-center py-8">
-              <div className="w-16 h-16 mx-auto mb-4 bg-blue-50 rounded-full flex items-center justify-center">
-                <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-16 h-16 mx-auto mb-4 bg-slate-50 rounded-full flex items-center justify-center">
+                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                 </svg>
               </div>
-              <p className="text-gray-600 mb-2">No goals yet</p>
-              <p className="text-sm text-gray-500 mb-4">Set financial goals to track your progress</p>
+              <p className="text-slate-600 mb-2">No goals yet</p>
+              <p className="text-sm text-slate-500 mb-4">Set financial goals to track your progress</p>
               <button
                 onClick={openNewGoal}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+                className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 hover:-translate-y-px transition-all shadow-button"
               >
                 Create Your First Goal
               </button>
@@ -129,28 +130,28 @@ export function GoalsWidget() {
                     key={goal.id}
                     className={`p-4 rounded-lg border transition cursor-pointer hover:shadow-sm ${
                       isComplete
-                        ? 'bg-green-50 border-green-200'
-                        : 'bg-gray-50 border-gray-200 hover:border-blue-200'
+                        ? 'bg-emerald-500/10 border-emerald-200'
+                        : 'bg-slate-50 border-slate-200 hover:border-slate-300'
                     }`}
                     onClick={() => openEditGoal(goal)}
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-medium text-gray-900 truncate">{goal.name}</h3>
-                          <span className={`text-xs px-2 py-0.5 rounded-full capitalize ${getPriorityColor(goal.priority)}`}>
+                          <h3 className="font-medium text-slate-900 truncate">{goal.name}</h3>
+                          <span className={`text-xs font-semibold uppercase tracking-wide px-2 py-0.5 rounded capitalize ${getPriorityColor(goal.priority)}`}>
                             {goal.priority}
                           </span>
                         </div>
                         {goal.description && (
-                          <p className="text-sm text-gray-500 truncate">{goal.description}</p>
+                          <p className="text-sm text-slate-500 truncate">{goal.description}</p>
                         )}
                       </div>
                       <div className="text-right ml-4">
-                        <p className="text-lg font-semibold text-gray-900">
+                        <p className="text-lg font-semibold text-slate-900">
                           {formatCurrency(goal.current_amount)}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-slate-500">
                           of {formatCurrency(goal.target_amount)}
                         </p>
                       </div>
@@ -158,7 +159,7 @@ export function GoalsWidget() {
 
                     {/* Progress bar */}
                     <div className="mb-2">
-                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${getProgressColor(progressPercent, goal.on_track)}`}
                           style={{ width: `${Math.min(100, progressPercent)}%` }}
@@ -168,7 +169,7 @@ export function GoalsWidget() {
 
                     {/* Meta info */}
                     <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-3 text-gray-500">
+                      <div className="flex items-center gap-3 text-slate-500">
                         <span>{progressPercent.toFixed(0)}% complete</span>
                         {goal.deadline && (
                           <span>
@@ -176,7 +177,7 @@ export function GoalsWidget() {
                           </span>
                         )}
                         {goal.on_track !== null && (
-                          <span className={goal.on_track ? 'text-green-600' : 'text-red-600'}>
+                          <span className={goal.on_track ? 'text-emerald-600' : 'text-rose-600'}>
                             {goal.on_track ? 'On track' : 'Behind'}
                           </span>
                         )}
@@ -189,7 +190,7 @@ export function GoalsWidget() {
                             e.stopPropagation();
                             setAddingProgressTo(addingProgressTo === goal.id ? null : goal.id);
                           }}
-                          className="text-blue-600 hover:text-blue-700 font-medium"
+                          className="text-slate-600 hover:text-slate-800 font-medium"
                         >
                           + Add Progress
                         </button>
@@ -203,7 +204,7 @@ export function GoalsWidget() {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="relative flex-1">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
                           <input
                             type="number"
                             value={progressAmount}
@@ -211,14 +212,14 @@ export function GoalsWidget() {
                             placeholder="0.00"
                             min="0"
                             step="0.01"
-                            className="w-full pl-7 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="w-full pl-7 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-transparent bg-white"
                             autoFocus
                           />
                         </div>
                         <button
                           onClick={() => handleAddProgress(goal.id)}
                           disabled={!progressAmount || parseFloat(progressAmount) <= 0}
-                          className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                          className="px-3 py-1.5 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
                         >
                           Add
                         </button>
@@ -227,7 +228,7 @@ export function GoalsWidget() {
                             setAddingProgressTo(null);
                             setProgressAmount('');
                           }}
-                          className="px-3 py-1.5 text-gray-600 text-sm hover:bg-gray-200 rounded-lg transition"
+                          className="px-3 py-1.5 text-slate-600 text-sm hover:bg-slate-200 rounded-lg transition"
                         >
                           Cancel
                         </button>
@@ -241,10 +242,10 @@ export function GoalsWidget() {
 
           {/* Monthly allocation summary */}
           {goals.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
+            <div className="mt-4 pt-4 border-t border-slate-200">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">Total monthly allocation</span>
-                <span className="font-semibold text-gray-900">
+                <span className="text-slate-600">Total monthly allocation</span>
+                <span className="font-semibold text-slate-900">
                   {formatCurrency(
                     goals.reduce((sum, g) => sum + (g.monthly_allocation || 0), 0)
                   )}

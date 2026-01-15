@@ -146,6 +146,13 @@ export const getCategoryMerchants = (category: string, month?: number, year?: nu
 export const getTransactionsByPeriod = (period: 'day' | 'week' | 'month' = 'month') =>
   fetchAPI<any[]>(`/api/dashboard/transactions/by-period?period=${period}`);
 
+export const getSpendingTrend = (view: 'daily' | 'monthly' | 'yearly' = 'daily', budget?: number) => {
+  const params = new URLSearchParams();
+  params.set('view', view);
+  if (budget) params.set('budget', budget.toString());
+  return fetchAPI<any>(`/api/dashboard/spending-trend?${params.toString()}`);
+};
+
 // Category management
 export interface Category {
   name: string;

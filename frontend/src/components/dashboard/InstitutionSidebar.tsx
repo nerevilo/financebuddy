@@ -174,31 +174,31 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
 
   if (loading) {
     return (
-      <aside className="w-72 bg-white border-r border-gray-200 flex flex-col fixed left-0 top-0 h-screen">
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="font-semibold text-gray-900">Connected Accounts</h2>
+      <aside className="w-72 bg-surface-sidebar flex flex-col fixed left-0 top-0 h-screen">
+        <div className="p-4 border-b border-slate-700">
+          <h2 className="font-semibold text-white">Connected Accounts</h2>
         </div>
         <div className="flex-1 flex items-center justify-center">
-          <div className="animate-spin h-6 w-6 border-2 border-blue-600 border-t-transparent rounded-full" />
+          <div className="animate-spin h-6 w-6 border-2 border-slate-400 border-t-transparent rounded-full" />
         </div>
       </aside>
     );
   }
 
   return (
-    <aside className="w-72 bg-white border-r border-gray-200 flex flex-col fixed left-0 top-0 h-screen">
-      <div className="p-4 border-b border-gray-200">
-        <h2 className="font-semibold text-gray-900">Finance Buddy</h2>
+    <aside className="w-72 bg-surface-sidebar flex flex-col fixed left-0 top-0 h-screen">
+      <div className="p-4 border-b border-slate-700">
+        <h2 className="font-semibold text-white tracking-tight">Finance Buddy</h2>
       </div>
 
       {/* Navigation */}
-      <nav className="p-2 border-b border-gray-200">
+      <nav className="p-2 border-b border-slate-700">
         <Link
           href="/"
           className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
             pathname === '/'
-              ? 'bg-blue-50 text-blue-700'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              ? 'bg-slate-700 text-white'
+              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
           }`}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -210,8 +210,8 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
           href="/transactions"
           className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
             pathname === '/transactions'
-              ? 'bg-blue-50 text-blue-700'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              ? 'bg-slate-700 text-white'
+              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
           }`}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -223,17 +223,17 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
 
       {/* Accounts Header */}
       <div className="px-4 py-3">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Connected Accounts</h3>
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Connected Accounts</h3>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {institutions.length === 0 ? (
-          <div className="p-4 text-center text-gray-500">
+          <div className="p-4 text-center text-slate-400">
             <p className="text-sm">No accounts connected</p>
-            <p className="text-xs mt-1">Add a bank to get started</p>
+            <p className="text-xs mt-1 text-slate-500">Add a bank to get started</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-slate-700/50">
             {institutions.map(institution => (
               <div key={institution.id} className="py-2">
                 {/* Institution Header */}
@@ -243,7 +243,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
                     className="flex items-center gap-2 flex-1 text-left"
                   >
                     <svg
-                      className={`w-4 h-4 text-gray-400 transition-transform ${
+                      className={`w-4 h-4 text-slate-500 transition-transform ${
                         expandedIds.has(institution.id) ? 'rotate-90' : ''
                       }`}
                       fill="none"
@@ -252,7 +252,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
                     >
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
-                    <span className="font-medium text-gray-900 text-sm">{institution.name}</span>
+                    <span className="font-medium text-white text-sm">{institution.name}</span>
                   </button>
 
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -260,7 +260,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
                     <button
                       onClick={() => handleSync(institution.id)}
                       disabled={syncingIds.has(institution.id)}
-                      className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                      className="p-1 text-slate-400 hover:text-white rounded"
                       title="Sync"
                     >
                       <svg
@@ -285,7 +285,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
                           e.stopPropagation();
                           setMenuOpenId(menuOpenId === institution.id ? null : institution.id);
                         }}
-                        className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                        className="p-1 text-slate-400 hover:text-white rounded"
                       >
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                           <circle cx="12" cy="6" r="2" />
@@ -296,12 +296,12 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
 
                       {menuOpenId === institution.id && (
                         <div
-                          className="absolute right-0 mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10"
+                          className="absolute right-0 mt-1 w-36 bg-slate-800 border border-slate-600 rounded-lg shadow-lg z-10"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
                             onClick={() => handleDisconnect(institution.id)}
-                            className="w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                            className="w-full px-3 py-2 text-left text-sm text-rose-400 hover:bg-slate-700 rounded-lg"
                           >
                             Disconnect
                           </button>
@@ -320,16 +320,16 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
                         className="flex items-center justify-between py-2 pl-6"
                       >
                         <div className="flex items-center gap-2">
-                          <div className="text-gray-500">{getAccountIcon(account.type, account.subtype)}</div>
+                          <div className="text-slate-400">{getAccountIcon(account.type, account.subtype)}</div>
                           <div>
-                            <p className="text-sm text-gray-700">{account.name}</p>
+                            <p className="text-sm text-slate-200">{account.name}</p>
                             {account.last_four && (
-                              <p className="text-xs text-gray-400">••{account.last_four}</p>
+                              <p className="text-xs text-slate-500">••{account.last_four}</p>
                             )}
                           </div>
                         </div>
                         <span className={`text-sm font-medium ${
-                          account.current_balance < 0 ? 'text-red-600' : 'text-gray-900'
+                          account.current_balance < 0 ? 'text-rose-400' : 'text-white'
                         }`}>
                           {formatCurrency(account.current_balance)}
                         </span>
@@ -338,7 +338,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
 
                     {/* Sync Status */}
                     <div className="pl-6 pt-1">
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-slate-500">
                         Synced {formatTimeAgo(institution.last_synced_at)}
                       </span>
                     </div>
@@ -351,15 +351,15 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
       </div>
 
       {/* Add Bank Button */}
-      <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-slate-700">
         <button
           onClick={openTellerConnect}
           disabled={!tellerReady || addingBank}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-700 rounded-lg hover:bg-slate-600 disabled:opacity-50 transition-colors"
         >
           {addingBank ? (
             <>
-              <div className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full" />
+              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
               Connecting...
             </>
           ) : (

@@ -144,19 +144,19 @@ export function BudgetSettingModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="flex items-center justify-between p-6 border-b border-neutral-200">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="w-10 h-10 rounded-full bg-success-100 flex items-center justify-center">
+              <svg className="w-5 h-5 text-success-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Monthly Budget</h2>
-              <p className="text-sm text-gray-500">Set spending limits for the month</p>
+              <h2 className="text-xl font-bold text-neutral-900">Monthly Budget</h2>
+              <p className="text-sm text-neutral-500">Set spending limits for the month</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition">
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-600 transition">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -166,12 +166,12 @@ export function BudgetSettingModal({
         <form onSubmit={handleSubmit}>
           <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-200px)]">
             {/* Total Budget */}
-            <div className="bg-green-50 rounded-xl p-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+            <div className="bg-success-50 rounded-xl p-4">
+              <label className="block text-sm font-medium text-neutral-700 mb-2">
                 Total Monthly Budget
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 text-lg">$</span>
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 text-lg">$</span>
                 <input
                   type="number"
                   value={totalBudget}
@@ -179,13 +179,13 @@ export function BudgetSettingModal({
                   placeholder="0.00"
                   min="0"
                   step="0.01"
-                  className="w-full pl-10 pr-4 py-3 text-2xl font-semibold border border-green-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 transition"
+                  className="w-full pl-10 pr-4 py-3 text-2xl font-semibold border border-success-200 rounded-lg focus:ring-2 focus:ring-success-400 focus:border-success-400 transition"
                 />
               </div>
               {totalBudget && parseFloat(totalBudget) > 0 && (
                 <div className="mt-3 flex justify-between text-sm">
-                  <span className="text-gray-600">Allocated to categories</span>
-                  <span className={remainingBudget < 0 ? 'text-red-600 font-medium' : 'text-gray-900'}>
+                  <span className="text-neutral-600">Allocated to categories</span>
+                  <span className={remainingBudget < 0 ? 'text-danger-500 font-medium' : 'text-neutral-900'}>
                     {formatCurrency(totalCategoryBudgets)} ({remainingBudget >= 0 ? formatCurrency(remainingBudget) + ' unallocated' : formatCurrency(Math.abs(remainingBudget)) + ' over'})
                   </span>
                 </div>
@@ -194,7 +194,7 @@ export function BudgetSettingModal({
 
             {/* Alert Threshold */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-neutral-700 mb-2">
                 Alert me when I reach
               </label>
               <div className="flex items-center gap-4">
@@ -205,20 +205,20 @@ export function BudgetSettingModal({
                   step="5"
                   value={alertThreshold}
                   onChange={(e) => setAlertThreshold(parseInt(e.target.value))}
-                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  className="flex-1 h-2 bg-neutral-200 rounded-lg appearance-none cursor-pointer"
                 />
-                <span className="text-lg font-semibold text-gray-900 w-16 text-right">
+                <span className="text-lg font-semibold text-neutral-900 w-16 text-right">
                   {alertThreshold}%
                 </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-neutral-500 mt-1">
                 You'll get alerts when spending reaches {alertThreshold}% of your budget
               </p>
             </div>
 
             {/* Category Budgets */}
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-3">Category Budgets</h3>
+              <h3 className="text-sm font-medium text-neutral-700 mb-3">Category Budgets</h3>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {categoryBudgets.map((cb) => {
                   const spending = getSpending(cb.category);
@@ -230,8 +230,8 @@ export function BudgetSettingModal({
                       key={cb.category}
                       className={`flex items-center gap-3 p-3 rounded-lg border transition ${
                         cb.enabled
-                          ? 'bg-white border-gray-200'
-                          : 'bg-gray-50 border-gray-100'
+                          ? 'bg-white border-neutral-200'
+                          : 'bg-cream-50 border-neutral-100'
                       }`}
                     >
                       {/* Enable toggle */}
@@ -240,8 +240,8 @@ export function BudgetSettingModal({
                         onClick={() => handleToggleCategory(cb.category)}
                         className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${
                           cb.enabled
-                            ? 'bg-green-500 border-green-500'
-                            : 'border-gray-300'
+                            ? 'bg-success-500 border-success-400'
+                            : 'border-neutral-300'
                         }`}
                       >
                         {cb.enabled && (
@@ -255,22 +255,22 @@ export function BudgetSettingModal({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-lg">{getEmoji(cb.category)}</span>
-                          <span className={`font-medium truncate ${cb.enabled ? 'text-gray-900' : 'text-gray-500'}`}>
+                          <span className={`font-medium truncate ${cb.enabled ? 'text-neutral-900' : 'text-neutral-500'}`}>
                             {cb.category}
                           </span>
                         </div>
                         {cb.enabled && cb.amount > 0 && (
                           <div className="mt-1">
                             <div className="flex justify-between text-xs mb-0.5">
-                              <span className="text-gray-500">{formatCurrency(spending)} spent</span>
-                              <span className={isOverBudget ? 'text-red-600' : 'text-gray-500'}>
+                              <span className="text-neutral-500">{formatCurrency(spending)} spent</span>
+                              <span className={isOverBudget ? 'text-danger-500' : 'text-neutral-500'}>
                                 {percentUsed.toFixed(0)}%
                               </span>
                             </div>
-                            <div className="h-1 bg-gray-200 rounded-full overflow-hidden">
+                            <div className="h-1 bg-neutral-200 rounded-full overflow-hidden">
                               <div
                                 className={`h-full rounded-full transition-all ${
-                                  isOverBudget ? 'bg-red-500' : percentUsed > 80 ? 'bg-orange-500' : 'bg-green-500'
+                                  isOverBudget ? 'bg-danger-500' : percentUsed > 80 ? 'bg-warning-500' : 'bg-success-500'
                                 }`}
                                 style={{ width: `${Math.min(100, percentUsed)}%` }}
                               />
@@ -281,7 +281,7 @@ export function BudgetSettingModal({
 
                       {/* Budget input */}
                       <div className="relative w-28">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">$</span>
                         <input
                           type="number"
                           value={cb.amount || ''}
@@ -290,7 +290,7 @@ export function BudgetSettingModal({
                           min="0"
                           step="1"
                           disabled={!cb.enabled}
-                          className="w-full pl-6 pr-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 disabled:bg-gray-100 disabled:text-gray-400 transition"
+                          className="w-full pl-6 pr-2 py-1.5 text-sm border border-neutral-200 rounded-lg focus:ring-2 focus:ring-success-400 focus:border-success-400 disabled:bg-neutral-100 disabled:text-neutral-400 transition"
                         />
                       </div>
                     </div>
@@ -301,18 +301,18 @@ export function BudgetSettingModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-neutral-200 bg-cream-50">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium transition"
+              className="px-4 py-2 text-neutral-600 hover:text-neutral-800 font-medium transition"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 transition"
+              className="px-6 py-2 bg-success-500 text-white rounded-lg font-medium hover:bg-success-600 disabled:opacity-50 transition"
             >
               {isSaving ? 'Saving...' : 'Save Budget'}
             </button>

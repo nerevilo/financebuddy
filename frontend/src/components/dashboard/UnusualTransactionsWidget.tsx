@@ -83,20 +83,20 @@ export function UnusualTransactionsWidget({
   }
 
   return (
-    <div className="bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-6">
+    <div className="bg-warning-50 rounded-xl shadow-sm border border-warning-200 p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xl">⚠️</span>
-          <h3 className="text-lg font-semibold text-gray-900">Unusual Transactions</h3>
+          <h3 className="text-lg font-semibold text-neutral-900">Unusual Transactions</h3>
           {totalUnreviewed > 0 && (
-            <span className="bg-amber-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
+            <span className="bg-warning-500 text-white text-xs font-medium px-2 py-0.5 rounded-full">
               {totalUnreviewed} to review
             </span>
           )}
         </div>
       </div>
 
-      <p className="text-sm text-gray-600 mb-4">
+      <p className="text-sm text-neutral-600 mb-4">
         These transactions look different from your usual spending. Mark them as one-time expenses to keep your budget accurate.
       </p>
 
@@ -104,24 +104,24 @@ export function UnusualTransactionsWidget({
         {transactions.map((txn) => (
           <div
             key={txn.id}
-            className="bg-white rounded-lg border border-amber-100 p-4 transition-all hover:border-amber-300"
+            className="bg-white rounded-lg border border-warning-100 p-4 transition-all hover:border-warning-300"
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-base">{getReasonEmoji(txn.anomaly_reason)}</span>
-                  <span className="font-semibold text-gray-900 truncate">
+                  <span className="font-semibold text-neutral-900 truncate">
                     {txn.merchant || 'Unknown Merchant'}
                   </span>
-                  <span className="text-xs text-gray-400">{formatDate(txn.date)}</span>
+                  <span className="text-xs text-neutral-400">{formatDate(txn.date)}</span>
                 </div>
-                <p className="text-sm text-gray-600 line-clamp-2">{txn.description}</p>
+                <p className="text-sm text-neutral-600 line-clamp-2">{txn.description}</p>
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
+                  <span className="text-xs bg-warning-100 text-warning-700 px-2 py-0.5 rounded">
                     {getReasonLabel(txn.anomaly_reason)}
                   </span>
                   {txn.category && (
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                    <span className="text-xs bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded">
                       {txn.category}
                     </span>
                   )}
@@ -129,7 +129,7 @@ export function UnusualTransactionsWidget({
               </div>
 
               <div className="text-right flex-shrink-0">
-                <div className="text-lg font-bold text-gray-900 mb-2">
+                <div className="text-lg font-bold text-neutral-900 mb-2">
                   {formatCurrency(txn.amount)}
                 </div>
 
@@ -137,14 +137,14 @@ export function UnusualTransactionsWidget({
                   <button
                     onClick={() => handleMarkOneTime(txn.id)}
                     disabled={processingId === txn.id}
-                    className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                    className="text-xs bg-warning-500 hover:bg-warning-600 text-white px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                   >
                     {processingId === txn.id ? '...' : 'One-Time'}
                   </button>
                   <button
                     onClick={() => handleMarkNormal(txn.id)}
                     disabled={processingId === txn.id}
-                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
+                    className="text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 px-3 py-1.5 rounded-lg transition disabled:opacity-50"
                   >
                     Normal
                   </button>
@@ -156,7 +156,7 @@ export function UnusualTransactionsWidget({
       </div>
 
       {totalUnreviewed > transactions.length && (
-        <button className="mt-4 text-sm text-amber-700 hover:text-amber-800 font-medium">
+        <button className="mt-4 text-sm text-warning-700 hover:text-warning-700 font-medium">
           View all {totalUnreviewed} unusual transactions →
         </button>
       )}

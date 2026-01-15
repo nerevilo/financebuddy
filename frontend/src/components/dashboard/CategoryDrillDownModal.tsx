@@ -25,9 +25,10 @@ export function CategoryDrillDownModal({ category, emoji, isOpen, onClose }: Cat
     const centerX = 100;
     const centerY = 100;
 
+    // Pastel macaron colors for pie chart
     const colors = [
-      '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-      '#EC4899', '#14B8A6', '#F97316', '#06B6D4', '#84CC16'
+      '#A18AE8', '#6DB88A', '#F5CE4D', '#F07878', '#BBA7F2',
+      '#FFB3B3', '#8ECCA6', '#FFD9BE', '#B3DEC2', '#D4C4F9'
     ];
 
     return merchants.slice(0, 10).map((merchant, index) => {
@@ -68,17 +69,17 @@ export function CategoryDrillDownModal({ category, emoji, isOpen, onClose }: Cat
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full m-4 max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+        <div className="flex items-center justify-between p-6 border-b border-neutral-200">
           <div className="flex items-center gap-3">
             <span className="text-4xl">{emoji}</span>
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 capitalize">{category}</h2>
-              {data && <p className="text-gray-600 text-sm">Breakdown by merchant</p>}
+              <h2 className="text-2xl font-bold text-neutral-900 capitalize">{category}</h2>
+              {data && <p className="text-neutral-600 text-sm">Breakdown by merchant</p>}
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition"
+            className="text-neutral-400 hover:text-neutral-600 transition"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -90,14 +91,14 @@ export function CategoryDrillDownModal({ category, emoji, isOpen, onClose }: Cat
         <div className="p-6 overflow-y-auto max-h-[calc(90vh-100px)]">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-400"></div>
             </div>
           ) : data && data.merchants ? (
             <div className="space-y-6">
               {/* Total */}
-              <div className="bg-blue-50 rounded-xl p-4">
-                <div className="text-sm text-gray-600">Total {category} spending</div>
-                <div className="text-3xl font-bold text-gray-900">{formatCurrency(data.total)}</div>
+              <div className="bg-primary-50 rounded-xl p-4">
+                <div className="text-sm text-neutral-600">Total {category} spending</div>
+                <div className="text-3xl font-bold text-neutral-900">{formatCurrency(data.total)}</div>
               </div>
 
               {/* Pie Chart and Legend */}
@@ -128,16 +129,16 @@ export function CategoryDrillDownModal({ category, emoji, isOpen, onClose }: Cat
                           className="w-4 h-4 rounded"
                           style={{ backgroundColor: segment.color }}
                         ></div>
-                        <span className="font-medium text-gray-700">{segment.merchant}</span>
+                        <span className="font-medium text-neutral-700">{segment.merchant}</span>
                       </div>
                       <div className="text-right">
-                        <div className="font-semibold text-gray-900">{formatCurrency(segment.amount)}</div>
-                        <div className="text-xs text-gray-500">{segment.percentage.toFixed(1)}%</div>
+                        <div className="font-semibold text-neutral-900">{formatCurrency(segment.amount)}</div>
+                        <div className="text-xs text-neutral-500">{segment.percentage.toFixed(1)}%</div>
                       </div>
                     </div>
                   ))}
                   {data.merchants.length > 10 && (
-                    <div className="text-xs text-gray-500 pt-2">
+                    <div className="text-xs text-neutral-500 pt-2">
                       +{data.merchants.length - 10} more merchants
                     </div>
                   )}
@@ -146,17 +147,17 @@ export function CategoryDrillDownModal({ category, emoji, isOpen, onClose }: Cat
 
               {/* Full List */}
               <div>
-                <h3 className="font-semibold text-gray-900 mb-3">All Merchants</h3>
+                <h3 className="font-semibold text-neutral-900 mb-3">All Merchants</h3>
                 <div className="space-y-2">
                   {data.merchants.map((merchant: any, index: number) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                    <div key={index} className="flex items-center justify-between p-3 bg-cream-50 rounded-lg hover:bg-neutral-100 transition">
                       <div>
-                        <div className="font-medium text-gray-900">{merchant.merchant}</div>
-                        <div className="text-xs text-gray-500">{merchant.count} purchases</div>
+                        <div className="font-medium text-neutral-900">{merchant.merchant}</div>
+                        <div className="text-xs text-neutral-500">{merchant.count} purchases</div>
                       </div>
                       <div className="text-right">
-                        <div className="font-semibold text-gray-900">{formatCurrency(merchant.amount)}</div>
-                        <div className="text-xs text-gray-500">{merchant.percentage.toFixed(1)}%</div>
+                        <div className="font-semibold text-neutral-900">{formatCurrency(merchant.amount)}</div>
+                        <div className="text-xs text-neutral-500">{merchant.percentage.toFixed(1)}%</div>
                       </div>
                     </div>
                   ))}
@@ -164,7 +165,7 @@ export function CategoryDrillDownModal({ category, emoji, isOpen, onClose }: Cat
               </div>
             </div>
           ) : (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-neutral-500">
               No data available for this category
             </div>
           )}
