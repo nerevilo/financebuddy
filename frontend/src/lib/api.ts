@@ -161,10 +161,66 @@ export interface Category {
 
 export const getCategories = () => fetchAPI<Category[]>('/transactions/categories');
 
-export const updateTransactionCategory = (transactionId: string, category: string) =>
-  fetchAPI<Transaction>(`/transactions/${transactionId}/category`, {
+// ==================== Merchant Category Rule types ====================
+
+export interface MerchantCheckResponse {
+  merchant_name: string;
+  has_existing_rule: boolean;
+  existing_category: string | null;
+  matching_transactions: number;
+}
+
+export interface CategoryUpdateWithRuleResponse {
+  transaction: TransactionDetail;
+  rule_created: boolean;
+  rule_id: string | null;
+  transactions_updated: number;
+}
+
+export interface MerchantCategoryRule {
+  id: string;
+  merchant_name: string;
+  category: string;
+  is_active: boolean;
+  times_applied: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface MerchantCategoryRulesListResponse {
+  rules: MerchantCategoryRule[];
+  total: number;
+}
+
+// Update transaction category with optional rule creation
+export const updateTransactionCategoryWithRule = (
+  transactionId: string,
+  category: string,
+  applyToAll: boolean = false
+) =>
+  fetchAPI<CategoryUpdateWithRuleResponse>(`/transactions/${transactionId}/category`, {
     method: 'PATCH',
-    body: JSON.stringify({ category }),
+    body: JSON.stringify({ category, apply_to_all: applyToAll }),
+  });
+
+// Legacy function for backward compatibility (calls the new endpoint with applyToAll=false)
+export const updateTransactionCategory = (transactionId: string, category: string) =>
+  updateTransactionCategoryWithRule(transactionId, category, false);
+
+// Check merchant for rule opportunity
+export const checkMerchantRule = (merchantName: string) =>
+  fetchAPI<MerchantCheckResponse>(
+    `/transactions/rules/check-merchant/${encodeURIComponent(merchantName)}`
+  );
+
+// Get all merchant category rules
+export const getMerchantCategoryRules = () =>
+  fetchAPI<MerchantCategoryRulesListResponse>('/transactions/rules/merchant-categories');
+
+// Delete a merchant category rule
+export const deleteMerchantCategoryRule = (ruleId: string) =>
+  fetchAPI<{ message: string }>(`/transactions/rules/merchant-categories/${ruleId}`, {
+    method: 'DELETE',
   });
 
 // Transaction types
@@ -199,6 +255,7 @@ export interface TransactionListParams {
   offset?: number;
   show_unusual_only?: boolean;
   tag_ids?: string[];
+  q?: string; // Search query for description/merchant
 }
 
 // ==================== Tag types ====================
@@ -247,6 +304,7 @@ export const getTransactionsList = (params?: TransactionListParams) => {
   if (params?.offset) searchParams.set('offset', params.offset.toString());
   if (params?.show_unusual_only) searchParams.set('show_unusual_only', 'true');
   if (params?.tag_ids?.length) searchParams.set('tag_ids', params.tag_ids.join(','));
+  if (params?.q) searchParams.set('q', params.q);
 
   const query = searchParams.toString();
   return fetchAPI<TransactionListWithAnomaliesResponse>(`/transactions/list${query ? `?${query}` : ''}`);
@@ -501,4 +559,83 @@ export const markInsightRead = (insightId: string) =>
 export const regenerateInsights = () =>
   fetchAPI<DailyInsightsResponse>('/api/insights/regenerate', {
     method: 'POST',
+  });
+
+// ==================== Chat types ====================
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+  result?: Record<string, any>;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  content: string;
+  tool_calls?: ToolCall[];
+  created_at: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_message_preview?: string | null;
+}
+
+export interface Conversation {
+  id: string;
+  title: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  messages: ChatMessage[];
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationSummary[];
+  total: number;
+  has_more: boolean;
+}
+
+export interface ChatResponse {
+  message: ChatMessage;
+  tool_results?: ToolCall[];
+  conversation_id: string;
+}
+
+// ==================== Chat endpoints ====================
+
+export const getConversations = (limit = 20, offset = 0, status?: string) => {
+  const params = new URLSearchParams();
+  params.set('limit', limit.toString());
+  params.set('offset', offset.toString());
+  if (status) params.set('status', status);
+  return fetchAPI<ConversationListResponse>(`/api/chat/conversations?${params.toString()}`);
+};
+
+export const createConversation = () =>
+  fetchAPI<Conversation>('/api/chat/conversations', {
+    method: 'POST',
+  });
+
+export const getConversation = (conversationId: string) =>
+  fetchAPI<Conversation>(`/api/chat/conversations/${conversationId}`);
+
+export const deleteConversation = (conversationId: string) =>
+  fetchAPI<{ status: string; conversation_id: string }>(
+    `/api/chat/conversations/${conversationId}`,
+    { method: 'DELETE' }
+  );
+
+export const sendChatMessage = (conversationId: string, message: string) =>
+  fetchAPI<ChatResponse>(`/api/chat/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
   });

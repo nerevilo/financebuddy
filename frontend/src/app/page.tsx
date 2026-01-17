@@ -11,6 +11,7 @@ import { UnusualTransactionsBadge } from '@/components/dashboard/UnusualTransact
 import { GoalsWidget, GoalSuggestionsCard, GoalSettingModal } from '@/components/goals';
 import { BudgetOverviewWidget, BudgetSettingModal, useBudgetSettings } from '@/components/budget';
 import { InsightsWidget } from '@/components/insights';
+import { ChatSidebar, ChatButton } from '@/components/chat';
 import { useDashboard, useUnusualTransactions, useGoals } from '@/lib/hooks';
 import { formatCurrency } from '@/lib/utils';
 import { ProtectedRoute, useAuth } from '@/lib/auth';
@@ -27,13 +28,16 @@ function DashboardContent() {
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
 
+  // Chat sidebar state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
   const hasAccounts = accounts.length > 0;
 
   // Show skeleton instead of spinner when we have cached data
   const showSkeleton = isLoading && !balanceSummary;
 
   // Calculate total spent this month from income/expenses data
-  const totalSpentThisMonth = incomeExpenses?.total_expenses || 0;
+  const totalSpentThisMonth = incomeExpenses?.expenses || 0;
 
   // Get category spending for budget widget
   const categorySpending = dashboardData?.categories?.categories?.map((cat: any) => ({
@@ -240,6 +244,33 @@ function DashboardContent() {
 
         </main>
       </div>
+
+      {/* Chat Sidebar */}
+      <ChatSidebar isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+
+      {/* Mobile Chat Button */}
+      <ChatButton onClick={() => setIsChatOpen(true)} />
+
+      {/* Desktop Chat Toggle Button */}
+      <button
+        onClick={() => setIsChatOpen(true)}
+        className={`
+          fixed bottom-6 right-6 z-30
+          hidden lg:flex items-center gap-2
+          px-4 py-2.5 rounded-full
+          bg-slate-900 text-white shadow-lg
+          hover:bg-slate-800 hover:scale-105
+          transition-all duration-200
+          ${isChatOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}
+        `}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+          />
+        </svg>
+        <span className="text-sm font-medium">Ask Finance Buddy</span>
+      </button>
     </div>
   );
 }

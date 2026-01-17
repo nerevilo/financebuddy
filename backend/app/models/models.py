@@ -74,6 +74,9 @@ class User(Base):
 
 class Institution(Base):
     __tablename__ = "institutions"
+    __table_args__ = (
+        Index('ix_institutions_user_status', 'user_id', 'status'),
+    )
 
     id = Column(String, primary_key=True, default=generate_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
@@ -127,6 +130,13 @@ class Transaction(Base):
     __tablename__ = "transactions"
     __table_args__ = (
         Index('ix_transactions_account_id_date', 'account_id', 'date'),
+        Index('ix_transactions_teller_category', 'teller_category'),
+        Index('ix_transactions_enriched_category', 'enriched_category'),
+        Index('ix_transactions_is_transfer', 'is_transfer'),
+        Index('ix_transactions_merchant_name', 'merchant_name'),
+        # Partial index for unreviewed anomalies (fast lookup for anomaly widget)
+        Index('ix_transactions_unreviewed_anomalies', 'is_anomaly', 'user_reviewed',
+              postgresql_where='is_anomaly = true AND user_reviewed = false'),
     )
 
     id = Column(String, primary_key=True, default=generate_uuid)
@@ -228,6 +238,29 @@ class TransferRule(Base):
 
     # Relationships
     user = relationship("User", backref="transfer_rules")
+
+
+class MerchantCategoryRule(Base):
+    """
+    User-defined rules for automatic category assignment by merchant name.
+    Created when user changes a transaction's category and opts to apply to all similar.
+    """
+    __tablename__ = "merchant_category_rules"
+    __table_args__ = (
+        Index('ix_merchant_category_rules_user_merchant', 'user_id', 'merchant_name', unique=True),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    merchant_name = Column(String, nullable=False)  # Exact match on merchant_name field
+    category = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
+    times_applied = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", backref="merchant_category_rules")
 
 
 class UserProfile(Base):
@@ -364,3 +397,61 @@ class Insight(Base):
 
     # Relationships
     user = relationship("User", backref="insights")
+
+
+class Conversation(Base):
+    """Chat conversation sessions for the AI assistant."""
+    __tablename__ = "conversations"
+    __table_args__ = (
+        Index('ix_conversations_user_updated', 'user_id', 'updated_at'),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String, nullable=True)  # Auto-generated from first message
+    status = Column(String, default="active")  # active, archived
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_message_at = Column(DateTime, nullable=True)
+    message_count = Column(Integer, default=0)
+
+    # Metadata for analytics
+    tool_calls_count = Column(Integer, default=0)
+    llm_provider = Column(String, nullable=True)  # claude, gemini
+    total_tokens = Column(Integer, default=0)
+
+    # Relationships
+    user = relationship("User", backref="conversations")
+    messages = relationship(
+        "Message",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at"
+    )
+
+
+class Message(Base):
+    """Individual chat messages within a conversation."""
+    __tablename__ = "messages"
+    __table_args__ = (
+        Index('ix_messages_conversation_created', 'conversation_id', 'created_at'),
+    )
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # user, assistant, tool, system
+    content = Column(Text, nullable=False)
+
+    # Tool call metadata (for assistant messages that invoke tools)
+    tool_calls = Column(Text, nullable=True)  # JSON array of tool calls
+    tool_call_id = Column(String, nullable=True)  # For tool response messages
+    tool_name = Column(String, nullable=True)  # Which tool was called
+
+    # Token tracking
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    conversation = relationship("Conversation", back_populates="messages")

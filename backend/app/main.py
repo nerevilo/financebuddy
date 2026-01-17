@@ -32,7 +32,8 @@ from .routers import (
     insights_router,
     profile_router,
     anomalies_router,
-    tags_router
+    tags_router,
+    chat_router
 )
 
 # Create database tables
@@ -88,6 +89,7 @@ app.include_router(insights_router)
 app.include_router(profile_router)
 app.include_router(anomalies_router)
 app.include_router(tags_router)
+app.include_router(chat_router)
 
 
 @app.get("/")

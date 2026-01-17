@@ -12,6 +12,7 @@ from .insights import router as insights_router
 from .profile import router as profile_router
 from .anomalies import router as anomalies_router
 from .tags import router as tags_router
+from .chat import router as chat_router
 
 __all__ = [
     "auth_router",
@@ -27,5 +28,6 @@ __all__ = [
     "insights_router",
     "profile_router",
     "anomalies_router",
-    "tags_router"
+    "tags_router",
+    "chat_router"
 ]

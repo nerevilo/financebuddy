@@ -1,4 +1,5 @@
 import useSWR, { mutate, preload } from 'swr';
+import { useState, useCallback, useEffect } from 'react';
 import {
   getAccounts,
   getBalanceSummary,
@@ -33,6 +34,16 @@ import {
   regenerateInsights,
   Insight,
   DailyInsightsResponse,
+  // Chat
+  getConversations,
+  createConversation as createConversationAPI,
+  getConversation,
+  sendChatMessage,
+  ConversationListResponse,
+  Conversation,
+  ConversationSummary,
+  ChatMessage,
+  ChatResponse,
 } from './api';
 
 // Global refresh - invalidates all SWR caches
@@ -48,8 +59,15 @@ export async function refreshAllData() {
 const swrConfig = {
   revalidateOnFocus: true,
   revalidateOnReconnect: true,
-  dedupingInterval: 5000, // Dedupe requests within 5s
+  dedupingInterval: 10000, // Dedupe requests within 10s (was 5s)
   errorRetryCount: 3,
+};
+
+// Longer cache config for stable data (categories, merchants)
+const stableDataConfig = {
+  ...swrConfig,
+  dedupingInterval: 600000, // 10 minutes - stable data changes rarely
+  revalidateOnFocus: false, // Don't refetch on tab focus
 };
 
 // Fetcher that handles errors
@@ -133,10 +151,7 @@ export function useCategories() {
   const { data, error, isLoading } = useSWR(
     'categories',
     getCategories,
-    {
-      ...swrConfig,
-      dedupingInterval: 300000, // Cache for 5 minutes
-    }
+    stableDataConfig // Categories rarely change - use 10 min cache
   );
 
   return {
@@ -170,10 +185,7 @@ export function useTags() {
   const { data, error, isLoading, mutate } = useSWR<TagsListResponse>(
     'tags',
     getTags,
-    {
-      ...swrConfig,
-      dedupingInterval: 300000, // Cache for 5 minutes
-    }
+    stableDataConfig // Tags rarely change - use 10 min cache
   );
 
   return {
@@ -191,11 +203,7 @@ export function useCategoryMerchants(category: string | null) {
   const { data, error, isLoading } = useSWR(
     category ? ['category-merchants', category] : null,
     () => getCategoryMerchants(category!),
-    {
-      ...swrConfig,
-      dedupingInterval: 120000, // Cache for 2 minutes
-      revalidateOnFocus: false,
-    }
+    stableDataConfig // Merchant data rarely changes - use 10 min cache
   );
 
   return {
@@ -295,11 +303,7 @@ export function useGoalSuggestions() {
   const { data, error, isLoading } = useSWR<GoalSuggestion[]>(
     'goal-suggestions',
     getGoalSuggestions,
-    {
-      ...swrConfig,
-      dedupingInterval: 300000, // Cache for 5 minutes
-      revalidateOnFocus: false,
-    }
+    stableDataConfig // Suggestions are computed, use 10 min cache
   );
 
   return {
@@ -340,7 +344,7 @@ export function useDailyInsights() {
 
   const handleRegenerate = async (): Promise<DailyInsightsResponse> => {
     const newInsights = await regenerateInsights();
-    mutateInsights();
+    mutateInsights(newInsights, false); // Update cache immediately with new data
     return newInsights;
   };
 
@@ -355,5 +359,153 @@ export function useDailyInsights() {
     markAsRead: handleMarkRead,
     regenerate: handleRegenerate,
     refresh: mutateInsights,
+  };
+}
+
+// ==================== Chat hooks ====================
+
+// Conversations list hook - manages conversation history and active selection
+export function useConversations() {
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  const { data, error, isLoading, mutate: mutateConversations } = useSWR<ConversationListResponse>(
+    'conversations',
+    () => getConversations(20, 0),
+    {
+      ...swrConfig,
+      dedupingInterval: 30000, // Cache for 30 seconds
+      revalidateOnFocus: false,
+    }
+  );
+
+  const handleCreateConversation = useCallback(async (): Promise<Conversation | null> => {
+    try {
+      const newConv = await createConversationAPI();
+      mutateConversations();
+      setActiveConversationId(newConv.id);
+      return newConv;
+    } catch (err) {
+      console.error('Failed to create conversation:', err);
+      return null;
+    }
+  }, [mutateConversations]);
+
+  const setActiveConversation = useCallback((id: string | null) => {
+    setActiveConversationId(id);
+  }, []);
+
+  return {
+    conversations: data?.conversations || [],
+    total: data?.total || 0,
+    hasMore: data?.has_more || false,
+    activeConversationId,
+    setActiveConversation,
+    createConversation: handleCreateConversation,
+    isLoading,
+    error,
+    refresh: mutateConversations,
+  };
+}
+
+// Single chat hook - manages messages and sending for an active conversation
+export function useChat(conversationId: string | null) {
+  const [isSending, setIsSending] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
+  const [optimisticConvId, setOptimisticConvId] = useState<string | null>(null);
+
+  const { data, error, isLoading, mutate: mutateChat } = useSWR<Conversation>(
+    conversationId ? ['conversation', conversationId] : null,
+    () => getConversation(conversationId!),
+    {
+      ...swrConfig,
+      dedupingInterval: 5000, // Cache for 5 seconds
+      revalidateOnFocus: false,
+    }
+  );
+
+  // Clear optimistic messages only when server data includes them
+  // This prevents clearing messages during conversation switches
+  useEffect(() => {
+    if (data?.messages && data.messages.length > 0 && optimisticConvId === conversationId) {
+      // Check if server data now includes our optimistic messages
+      const serverHasMessages = optimisticMessages.length > 0 &&
+        optimisticMessages.every(optMsg =>
+          optMsg.id.startsWith('temp-') ||
+          data.messages.some(serverMsg => serverMsg.id === optMsg.id)
+        );
+
+      if (serverHasMessages || data.messages.length >= optimisticMessages.length) {
+        setOptimisticMessages([]);
+        setOptimisticConvId(null);
+      }
+    }
+  }, [data?.messages, conversationId, optimisticConvId, optimisticMessages]);
+
+  // Clear optimistic messages when switching to a different conversation
+  useEffect(() => {
+    if (optimisticConvId && optimisticConvId !== conversationId && !isSending) {
+      setOptimisticMessages([]);
+      setOptimisticConvId(null);
+    }
+  }, [conversationId, optimisticConvId, isSending]);
+
+  const handleSendMessage = useCallback(async (
+    convId: string,
+    message: string
+  ): Promise<ChatResponse | null> => {
+    setIsSending(true);
+    setOptimisticConvId(convId);
+
+    // Add optimistic user message immediately
+    const userMessage: ChatMessage = {
+      id: `temp-user-${Date.now()}`,
+      role: 'user',
+      content: message,
+      created_at: new Date().toISOString(),
+    };
+    setOptimisticMessages(prev => [...prev, userMessage]);
+
+    try {
+      const response = await sendChatMessage(convId, message);
+
+      // Replace temp user message with real one, add assistant response
+      setOptimisticMessages(prev => {
+        const withoutTemp = prev.filter(m => m.id !== userMessage.id);
+        return [...withoutTemp, { ...userMessage, id: `sent-${Date.now()}` }, response.message];
+      });
+
+      // Refresh the conversation to get the real data
+      // Use mutate with the specific key for the new conversation
+      mutate(['conversation', convId]);
+
+      // Also refresh conversation list to update titles/previews
+      mutate('conversations');
+
+      return response;
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      // Remove the optimistic message on error
+      setOptimisticMessages(prev => prev.filter(m => m.id !== userMessage.id));
+      return null;
+    } finally {
+      setIsSending(false);
+    }
+  }, []);
+
+  // Combine server messages with optimistic messages
+  // Only show optimistic messages if they belong to this conversation
+  const shouldShowOptimistic = optimisticConvId === conversationId || optimisticConvId === null;
+  const allMessages = data?.messages
+    ? [...data.messages, ...(shouldShowOptimistic ? optimisticMessages : [])]
+    : (shouldShowOptimistic ? optimisticMessages : []);
+
+  return {
+    messages: allMessages,
+    conversation: data || null,
+    isLoading: isLoading || isSending,
+    isSending,
+    error,
+    sendMessage: handleSendMessage,
+    refresh: mutateChat,
   };
 }

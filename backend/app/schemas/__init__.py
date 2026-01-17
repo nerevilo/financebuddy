@@ -20,7 +20,10 @@ from .schemas import (
     # Tags
     TagCreate, TagResponse, TagsListResponse,
     # Extended Transactions
-    TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse
+    TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse,
+    # Category Updates
+    CategoryUpdateWithRuleRequest, CategoryUpdateWithRuleResponse, MerchantCheckResponse,
+    MerchantCategoryRuleResponse, MerchantCategoryRulesListResponse,
 )
 
 __all__ = [
@@ -45,5 +48,8 @@ __all__ = [
     # Tags
     "TagCreate", "TagResponse", "TagsListResponse",
     # Extended Transactions
-    "TransactionDetailResponse", "TransactionUpdateRequest", "TransactionListWithAnomaliesResponse"
+    "TransactionDetailResponse", "TransactionUpdateRequest", "TransactionListWithAnomaliesResponse",
+    # Category Updates
+    "CategoryUpdateWithRuleRequest", "CategoryUpdateWithRuleResponse", "MerchantCheckResponse",
+    "MerchantCategoryRuleResponse", "MerchantCategoryRulesListResponse",
 ]
