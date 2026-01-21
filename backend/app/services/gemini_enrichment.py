@@ -13,15 +13,55 @@ Benefits:
 - Excellent structured output
 - Function calling for search tools
 - Fast (~300-500ms)
+- LLM response caching (7 days) for repeated merchant patterns
 """
 import json
 from typing import Optional, Dict
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
+from ..core.cache import get_cache, EnrichmentCacheKeys, CacheTTL
 from ..models.models import Transaction
 from .search_service import SearchService
+from .categories import get_all_category_ids, normalize_category_id
 
 logger = get_logger(__name__)
+
+# Standard categories for LLM prompt
+STANDARD_CATEGORIES_PROMPT = """
+VALID CATEGORIES (you MUST use one of these exact values):
+- groceries: Grocery stores, supermarkets, Costco/Walmart for food
+- fast_food: Quick service restaurants, burger joints, pizza delivery
+- restaurants: Sit-down dining, casual/fine dining, bars
+- coffee_shops: Coffee shops, cafes, Starbucks, Dunkin
+- gas_stations: Gas stations, fuel, Costco Gas, EV charging
+- parking: Parking lots, garages, meters
+- public_transit: Subway, bus, metro, train
+- rideshare: Uber, Lyft, taxi
+- auto: Car maintenance, repairs, oil change, car wash
+- shopping: General retail, Amazon, department stores
+- electronics: Electronics stores, Best Buy, Apple Store
+- clothing: Clothing stores, fashion, shoes
+- home_improvement: Hardware stores, Home Depot, Lowe's
+- utilities: Electric, water, gas utilities
+- phone_internet: Mobile phone, internet, cable (Verizon, AT&T)
+- insurance: Car/health/home insurance
+- software_subscriptions: Software, SaaS, Claude, OpenAI, GitHub, Cursor, Notion
+- streaming: Netflix, Spotify, Disney+, Hulu, YouTube Premium
+- gaming: Video games, Steam, PlayStation, Xbox
+- healthcare: Doctor, hospital, medical services
+- pharmacy: CVS, Walgreens, prescriptions
+- fitness: Gym membership, fitness classes
+- personal_care: Haircut, salon, spa
+- entertainment: Movies, concerts, events
+- travel: Flights, hotels, Airbnb
+- education: Tuition, courses, books
+- fees_charges: Bank fees, ATM fees, service charges
+- internal_transfer: Transfers between own accounts
+- external_transfer: Zelle, Venmo, PayPal transfers
+- credit_card_payment: Credit card bill payment
+- income: Salary, paycheck, refunds
+- other: Uncategorized
+"""
 
 # Optional import - only needed if using Gemini
 try:
@@ -52,14 +92,22 @@ class GeminiEnrichment:
         elif self.gemini_key and not GEMINI_AVAILABLE:
             logger.warning("Gemini API key provided but google-generativeai package not installed. Run: pip install google-generativeai")
 
-    async def enrich_basic(self, transaction: Transaction) -> Optional[Dict]:
+    async def enrich_basic(
+        self,
+        transaction: Transaction,
+        hint: Optional[Dict] = None
+    ) -> Optional[Dict]:
         """
         Basic enrichment without search (FAST & FREE)
+
+        Args:
+            transaction: Transaction to enrich
+            hint: Optional hint from semantic matching with suggested merchant/category
 
         Returns:
             {
                 "merchant": "Hardee's",
-                "category": "fast food",
+                "category": "fast_food",
                 "city": null,
                 "state": null,
                 "confidence": 0.88,
@@ -70,10 +118,39 @@ class GeminiEnrichment:
         if not self.model:
             return None
 
+        # Check cache first (skip if we have a hint - means we want fresh LLM opinion)
+        cache = get_cache()
+        cache_key = EnrichmentCacheKeys.gemini_result(transaction.description)
+
+        if not hint:  # Only use cache if no hint (fresh query)
+            cached_result = await cache.get(cache_key)
+            if cached_result:
+                cached_result["source"] = "gemini_flash_cached"
+                cached_result["cost"] = 0.0  # Free from cache
+                cached_result["cached"] = True
+                logger.debug("Cache hit for enrichment", extra={
+                    "description": transaction.description[:50],
+                    "merchant": cached_result.get("merchant")
+                })
+                return cached_result
+
+        # Build hint text if provided
+        hint_text = ""
+        if hint:
+            hint_text = f"""
+HINT FROM PATTERN MATCHING (verify or correct this):
+- Suggested merchant: {hint.get('suggested_merchant', 'unknown')}
+- Suggested category: {hint.get('suggested_category', 'unknown')}
+- Confidence: {hint.get('confidence', 0):.0%}
+Use this as a starting point but make your own determination based on the transaction description.
+"""
+
         prompt = f"""Analyze this bank transaction and extract merchant information.
 
 Transaction Description: "{transaction.description}"
 Amount: ${abs(transaction.amount)}
+{hint_text}
+{STANDARD_CATEGORIES_PROMPT}
 
 CRITICAL RULES:
 1. If this is an INTERNAL BANK TRANSACTION (withdrawals, deposits, transfers, interest, fees), return null merchant:
@@ -82,29 +159,42 @@ CRITICAL RULES:
 
 2. If this is a PERSON-TO-PERSON payment (Zelle, Venmo, PayPal, names), return null merchant:
    - Keywords: "Zelle", "Venmo", "PayPal", "money from [Name]", "Cashapp"
-   - Return: {{"merchant": null, "category": "p2p_transfer", "city": null, "state": null, "confidence": 1.0}}
+   - Return: {{"merchant": null, "category": "external_transfer", "city": null, "state": null, "confidence": 1.0}}
 
 3. If this is ROBINHOOD, CREDITS/DEBITS, ACH transfers, return null merchant:
    - Return: {{"merchant": null, "category": "internal_transfer", "city": null, "state": null, "confidence": 1.0}}
 
-4. ONLY if this is a REAL BUSINESS PURCHASE (Debit/Credit Card Purchase), extract:
+4. IMPORTANT GAS STATION DETECTION:
+   - "COSTCO GAS", "COSTCO GASOLINE", "COSTCO FUEL" → category: "gas_stations" (NOT groceries!)
+   - "SAMS CLUB GAS", "WALMART GAS", "KROGER FUEL" → category: "gas_stations"
+   - Any transaction with "GAS", "FUEL", "GASOLINE" at a retail store → "gas_stations"
+
+5. SOFTWARE/TECH SUBSCRIPTIONS:
+   - Claude, Anthropic, OpenAI, ChatGPT, Cursor, GitHub, Notion, Figma → "software_subscriptions"
+   - NOT "television" or "streaming" - these are developer/productivity tools
+
+6. ONLY if this is a REAL BUSINESS PURCHASE (Debit/Credit Card Purchase), extract:
    - Merchant: Clean business name (remove store numbers, keep it simple)
-   - Category: Specific type (fast food, groceries, gas station, coffee shop, retail, subscription, etc.)
+   - Category: Use ONLY from the valid categories list above
    - City/State: Extract from description if visible
    - Confidence: 0.85-0.95 for clear merchants
 
 Examples:
-✅ "Debit Card Purchase - HARDEE'S 594" → {{"merchant": "Hardee's", "category": "fast food", ...}}
-✅ "Debit Card Purchase - CLAUDE.AI SUBSCRIPTION" → {{"merchant": "Claude AI", "category": "software subscription", ...}}
+✅ "Debit Card Purchase - HARDEE'S 594" → {{"merchant": "Hardee's", "category": "fast_food", ...}}
+✅ "Debit Card Purchase - COSTCO GAS" → {{"merchant": "Costco Gas", "category": "gas_stations", ...}}
+✅ "Debit Card Purchase - COSTCO WHSE" → {{"merchant": "Costco", "category": "groceries", ...}}
+✅ "CLAUDE.AI SUBSCRIPTION" → {{"merchant": "Claude", "category": "software_subscriptions", ...}}
+✅ "ANTHROPIC" → {{"merchant": "Anthropic", "category": "software_subscriptions", ...}}
+✅ "OPENAI" → {{"merchant": "OpenAI", "category": "software_subscriptions", ...}}
+✅ "NETFLIX.COM" → {{"merchant": "Netflix", "category": "streaming", ...}}
 ❌ "Withdrawal to 360 Checking" → {{"merchant": null, "category": "internal_transfer", ...}}
 ❌ "Check Deposit (Mobile)" → {{"merchant": null, "category": "internal_transfer", ...}}
-❌ "Zelle money received from John" → {{"merchant": null, "category": "p2p_transfer", ...}}
-❌ "Deposit from ROBINHOOD CREDITS" → {{"merchant": null, "category": "internal_transfer", ...}}
+❌ "Zelle money received from John" → {{"merchant": null, "category": "external_transfer", ...}}
 
 Respond ONLY with valid JSON:
 {{
     "merchant": "Business Name or null",
-    "category": "category",
+    "category": "category_id from list above",
     "city": "city or null",
     "state": "state or null",
     "confidence": 0.0-1.0
@@ -123,8 +213,20 @@ Respond ONLY with valid JSON:
             result = self._extract_json(response.text)
 
             if result:
+                # Normalize category to standard taxonomy
+                if result.get("category"):
+                    result["category"] = normalize_category_id(result["category"])
                 result["source"] = "gemini_flash"
                 result["cost"] = 0.000075  # Free tier, but tracking theoretical cost
+                result["cached"] = False
+
+                # Cache the result for future use (7 days)
+                await cache.set(cache_key, result, ttl=CacheTTL.LLM_ENRICHMENT)
+                logger.debug("Cached enrichment result", extra={
+                    "description": transaction.description[:50],
+                    "merchant": result.get("merchant")
+                })
+
                 return result
 
         except Exception as e:
@@ -159,6 +261,21 @@ Respond ONLY with valid JSON:
         """
         if not self.model:
             return None
+
+        # Check cache first
+        cache = get_cache()
+        cache_key = EnrichmentCacheKeys.gemini_result(transaction.description) + ":search"
+
+        cached_result = await cache.get(cache_key)
+        if cached_result:
+            cached_result["source"] = "gemini_flash_search_cached"
+            cached_result["cost"] = 0.0  # Free from cache
+            cached_result["cached"] = True
+            logger.debug("Cache hit for search enrichment", extra={
+                "description": transaction.description[:50],
+                "merchant": cached_result.get("merchant")
+            })
+            return cached_result
 
         # Two-step approach: Always search for store numbers
         # Step 1: Detect if there's a store number
@@ -203,17 +320,24 @@ Search results for this merchant:
 
 Use the search results to find the exact address, city, and state."""
 
-        prompt += """
+        prompt += f"""
+
+{STANDARD_CATEGORIES_PROMPT}
+
+IMPORTANT: Use the exact category_id from the list above. Examples:
+- "COSTCO GAS" → "gas_stations" (NOT groceries)
+- "CLAUDE.AI" → "software_subscriptions" (NOT television)
+- "NETFLIX" → "streaming"
 
 Extract and return ONLY valid JSON:
-{
+{{
     "merchant": "Official Business Name",
-    "category": "category (e.g., fast food, groceries)",
+    "category": "category_id from list above",
     "address": "full address from search or null",
     "city": "city from search or null",
     "state": "state from search or null",
     "confidence": 0.0-1.0
-}"""
+}}"""
 
         try:
             response = self.model.generate_content(
@@ -227,10 +351,22 @@ Extract and return ONLY valid JSON:
             result = self._extract_json(response.text)
 
             if result:
+                # Normalize category to standard taxonomy
+                if result.get("category"):
+                    result["category"] = normalize_category_id(result["category"])
                 result["searched"] = has_store_number and bool(search_results_text)
                 result["search_query"] = search_query if search_query else None
-                result["source"] = "gemini_pro_search" if result["searched"] else "gemini_pro"
+                result["source"] = "gemini_flash_search" if result["searched"] else "gemini_flash"
                 result["cost"] = 0.005075 if result["searched"] else 0.000075
+                result["cached"] = False
+
+                # Cache the result for future use (7 days)
+                await cache.set(cache_key, result, ttl=CacheTTL.LLM_ENRICHMENT)
+                logger.debug("Cached search enrichment result", extra={
+                    "description": transaction.description[:50],
+                    "merchant": result.get("merchant")
+                })
+
                 return result
 
         except Exception as e:

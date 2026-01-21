@@ -2,19 +2,81 @@
 Redis Caching Module
 
 Provides optional Redis caching for expensive dashboard queries.
-If Redis is not configured, caching operations are no-ops and the app
-continues to work normally.
+If Redis is not configured, falls back to in-memory LRU cache.
 """
 import json
 import logging
-from typing import Any, Optional
+import time
+from typing import Any, Optional, Dict, Tuple
 from functools import wraps
+from collections import OrderedDict
+import threading
 
 logger = logging.getLogger(__name__)
 
 # Redis client - initialized lazily
 _redis_client = None
 _redis_available = False
+
+
+class InMemoryCache:
+    """
+    Simple in-memory LRU cache with TTL support.
+    Used as fallback when Redis is not available.
+    Thread-safe.
+    """
+
+    def __init__(self, max_size: int = 1000):
+        self.max_size = max_size
+        self._cache: OrderedDict[str, Tuple[Any, float]] = OrderedDict()  # key -> (value, expiry_time)
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> Optional[Any]:
+        """Get value if exists and not expired."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+
+            value, expiry = self._cache[key]
+            if expiry and time.time() > expiry:
+                del self._cache[key]
+                return None
+
+            # Move to end (most recently used)
+            self._cache.move_to_end(key)
+            return value
+
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Set value with optional TTL."""
+        with self._lock:
+            expiry = time.time() + ttl if ttl else None
+
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = (value, expiry)
+
+            # Evict oldest if over size
+            while len(self._cache) > self.max_size:
+                self._cache.popitem(last=False)
+
+            return True
+
+    def delete(self, key: str) -> bool:
+        """Delete a key."""
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
+                return True
+            return False
+
+    def clear(self):
+        """Clear all entries."""
+        with self._lock:
+            self._cache.clear()
+
+
+# In-memory cache fallback
+_memory_cache = InMemoryCache(max_size=5000)
 
 
 async def _get_redis():
@@ -85,21 +147,20 @@ class CacheService:
         Returns:
             Cached value or None if not found or error
         """
+        full_key = self._make_key(key)
+
+        # Try Redis first
         try:
             client = await _get_redis()
-            if client is None:
-                return None
-
-            full_key = self._make_key(key)
-            value = await client.get(full_key)
-
-            if value is None:
-                return None
-
-            return json.loads(value)
+            if client is not None:
+                value = await client.get(full_key)
+                if value is not None:
+                    return json.loads(value)
         except Exception as e:
-            logger.warning(f"Cache get error for key '{key}': {e}")
-            return None
+            logger.warning(f"Redis get error for key '{key}': {e}")
+
+        # Fallback to in-memory cache
+        return _memory_cache.get(full_key)
 
     async def set(self, key: str, value: Any, ttl: int = 300) -> bool:
         """
@@ -113,18 +174,22 @@ class CacheService:
         Returns:
             True if successful, False otherwise
         """
+        full_key = self._make_key(key)
+
+        # Always store in memory cache (fallback)
+        _memory_cache.set(full_key, value, ttl)
+
+        # Try Redis as primary
         try:
             client = await _get_redis()
-            if client is None:
-                return False
-
-            full_key = self._make_key(key)
-            serialized = json.dumps(value, default=str)
-            await client.set(full_key, serialized, ex=ttl)
-            return True
+            if client is not None:
+                serialized = json.dumps(value, default=str)
+                await client.set(full_key, serialized, ex=ttl)
+                return True
         except Exception as e:
-            logger.warning(f"Cache set error for key '{key}': {e}")
-            return False
+            logger.warning(f"Redis set error for key '{key}': {e}")
+
+        return True  # Still successful via memory cache
 
     async def delete(self, key: str) -> bool:
         """
@@ -136,17 +201,20 @@ class CacheService:
         Returns:
             True if deleted, False otherwise
         """
+        full_key = self._make_key(key)
+
+        # Delete from memory cache
+        _memory_cache.delete(full_key)
+
+        # Try Redis
         try:
             client = await _get_redis()
-            if client is None:
-                return False
-
-            full_key = self._make_key(key)
-            await client.delete(full_key)
-            return True
+            if client is not None:
+                await client.delete(full_key)
         except Exception as e:
-            logger.warning(f"Cache delete error for key '{key}': {e}")
-            return False
+            logger.warning(f"Redis delete error for key '{key}': {e}")
+
+        return True
 
     async def invalidate_pattern(self, pattern: str) -> int:
         """
@@ -255,6 +323,11 @@ class DashboardCacheKeys:
             return f"dashboard:{user_id}:spending_trend:{budget}"
         return f"dashboard:{user_id}:spending_trend:default"
 
+    @staticmethod
+    def recurring_payments(user_id: str, limit: int = 20) -> str:
+        """Key for recurring payments."""
+        return f"dashboard:{user_id}:recurring_payments:{limit}"
+
 
 # TTL constants (in seconds)
 class CacheTTL:
@@ -264,3 +337,48 @@ class CacheTTL:
     DEFAULT = 300  # 5 minutes - default dashboard data
     MEDIUM = 600  # 10 minutes - for monthly comparisons
     LONG = 1800  # 30 minutes - for historical data
+    LLM_ENRICHMENT = 86400 * 7  # 7 days - merchant categorization rarely changes
+
+
+# Cache key builders for LLM enrichment
+class EnrichmentCacheKeys:
+    """Helper class for building consistent enrichment cache keys."""
+
+    @staticmethod
+    def _normalize_description(description: str) -> str:
+        """Normalize description for consistent cache keys."""
+        import re
+        import hashlib
+        # Remove common prefixes, numbers, and normalize
+        normalized = description.upper().strip()
+        # Remove common transaction prefixes
+        prefixes = [
+            "DEBIT CARD PURCHASE - ",
+            "CREDIT CARD PURCHASE - ",
+            "ONLINE PURCHASE - ",
+            "POS ",
+            "ACH ",
+        ]
+        for prefix in prefixes:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+                break
+        # Remove store numbers (3-6 digits) and trailing location codes
+        normalized = re.sub(r'\s*#?\d{3,6}\s*', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        # Create short hash for very long descriptions
+        if len(normalized) > 50:
+            return hashlib.md5(normalized.encode()).hexdigest()[:16]
+        return normalized.replace(' ', '_').replace('.', '_')[:50]
+
+    @staticmethod
+    def llm_result(description: str) -> str:
+        """Key for LLM enrichment result."""
+        normalized = EnrichmentCacheKeys._normalize_description(description)
+        return f"enrichment:llm:{normalized}"
+
+    @staticmethod
+    def gemini_result(description: str) -> str:
+        """Key for Gemini enrichment result."""
+        normalized = EnrichmentCacheKeys._normalize_description(description)
+        return f"enrichment:gemini:{normalized}"

@@ -11,7 +11,7 @@ from typing import Optional, Dict, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
-from ..models import User, Transaction, Account, Institution
+from ..models import User, Transaction, Account, Institution, MerchantCategoryRule
 from ..core.logging_config import get_logger
 from .categorization import TransferDetector
 from .cascade_enrichment import CascadeEnrichment
@@ -21,14 +21,16 @@ logger = get_logger(__name__)
 
 # Estimated costs per method (conservative estimates)
 COST_ESTIMATES = {
-    "pattern": 0.0,
-    "gemini": 0.0001,      # Gemini Flash is very cheap
-    "llm_basic": 0.00025,  # Claude Haiku
-    "llm_search": 0.00525, # Claude Haiku + search
-    "ntropy": 0.02,        # Ntropy API
+    "semantic_rule": 0.0,      # Rule-based matching (FREE)
+    "semantic_similarity": 0.0, # BERT embedding similarity (FREE)
+    "pattern": 0.0,            # Legacy pattern matching (FREE)
+    "gemini": 0.0001,          # Gemini Flash is very cheap
+    "llm_basic": 0.00025,      # Claude Haiku
+    "llm_search": 0.00525,     # Claude Haiku + search
+    "ntropy": 0.02,            # Ntropy API
 }
 
-# Default: use pattern matching + Gemini (cheapest effective option)
+# Default: use semantic matching + Gemini cascade (cheapest effective option)
 DEFAULT_METHOD = "gemini"
 
 
@@ -183,6 +185,11 @@ class BudgetEnrichmentService:
         """
         Enrich specific new transactions (called after sync).
 
+        Priority order:
+        1. User merchant category rules (free, highest priority)
+        2. Transfer detection (free)
+        3. ML enrichment (paid)
+
         Args:
             user_id: User ID
             transaction_ids: List of new transaction IDs to enrich
@@ -203,8 +210,18 @@ class BudgetEnrichmentService:
             Transaction.id.in_(transaction_ids)
         ).all()
 
+        # Load user's merchant category rules into a dict for fast lookup
+        rules = self.db.query(MerchantCategoryRule).filter(
+            and_(
+                MerchantCategoryRule.user_id == user_id,
+                MerchantCategoryRule.is_active == True
+            )
+        ).all()
+        merchant_rules = {rule.merchant_name: rule for rule in rules}
+
         enriched_count = 0
         transfer_count = 0
+        rule_applied_count = 0
         total_cost = 0.0
         cascade = CascadeEnrichment()
 
@@ -212,7 +229,18 @@ class BudgetEnrichmentService:
             if total_cost >= remaining_budget:
                 break
 
-            # Check transfer first (free)
+            # FIRST: Check user merchant category rules (free, takes precedence)
+            if tx.merchant_name and tx.merchant_name in merchant_rules:
+                rule = merchant_rules[tx.merchant_name]
+                tx.enriched_category = rule.category
+                tx.categorization_source = "user_rule"
+                tx.categorization_confidence = 1.0
+                tx.enriched_at = datetime.utcnow()
+                rule.times_applied = (rule.times_applied or 0) + 1
+                rule_applied_count += 1
+                continue
+
+            # SECOND: Check transfer (free)
             if self.transfer_detector.is_transfer(tx):
                 tx.is_transfer = True
                 tx.categorization_source = "rule"
@@ -221,6 +249,7 @@ class BudgetEnrichmentService:
                 transfer_count += 1
                 continue
 
+            # THIRD: ML enrichment (paid)
             try:
                 result = await cascade.enrich_transaction(tx)
 
@@ -243,6 +272,7 @@ class BudgetEnrichmentService:
         return {
             "enriched": enriched_count,
             "transfers_detected": transfer_count,
+            "user_rules_applied": rule_applied_count,
             "cost": round(total_cost, 4),
             "budget_remaining": round(self.get_remaining_budget(user), 4)
         }

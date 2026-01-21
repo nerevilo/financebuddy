@@ -5,32 +5,39 @@ Smart multi-tier approach that minimizes costs while maximizing accuracy.
 
 Flow:
 1. Cache check (already enriched?) → FREE, instant
-2. Pattern matching (common merchants) → FREE, instant
+2. Semantic + Rule matching (intelligent patterns) → FREE, instant
 3. Gemini Flash (simple cases) → $0.000075, 300ms (FREE tier: 1,500/day!)
 4. Gemini Flash + Search (complex cases) → $0.005075, 3-5s
 5. Ntropy (fallback for failures) → $0.02, 2-3s
 
+Key Features:
+- Priority-based pattern matching (COSTCO GAS before COSTCO)
+- Semantic similarity using sentence-transformers
+- Standardized category taxonomy
+- Category normalization for consistent output
+
 Cost Optimization:
-- 70% handled by pattern matching → FREE
-- 20% handled by Gemini Flash → $0.000075 (FREE tier!)
-- 8% handled by Gemini + Search → $0.005075
+- 75% handled by semantic/rule matching → FREE
+- 17% handled by Gemini Flash → $0.000075 (FREE tier!)
+- 6% handled by Gemini + Search → $0.005075
 - 2% handled by Ntropy → $0.02
 
 Expected cost for 791 transactions:
-- Pattern: 553 × $0.00 = $0.00
-- Gemini: 158 × $0.000075 = $0.01 (FREE tier!)
-- Gemini+Search: 63 × $0.005075 = $0.32
+- Semantic/Rule: 593 × $0.00 = $0.00
+- Gemini: 134 × $0.000075 = $0.01 (FREE tier!)
+- Gemini+Search: 47 × $0.005075 = $0.24
 - Ntropy: 17 × $0.02 = $0.34
-TOTAL: $0.67 (vs $15.82 with Ntropy only = 96% savings!)
+TOTAL: $0.59 (vs $15.82 with Ntropy only = 96% savings!)
 """
 from typing import Optional, Dict
 from datetime import datetime
 from ..models.models import Transaction
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
-from .merchant_patterns import MerchantPatternMatcher
+from .semantic_matcher import get_semantic_matcher, SemanticMatcher
 from .gemini_enrichment import GeminiEnrichment
 from .ntropy_client import NtropyClient
+from .categories import normalize_category_id
 
 logger = get_logger(__name__)
 
@@ -41,25 +48,33 @@ class CascadeEnrichment:
 
     Tries methods from cheapest to most expensive,
     stopping as soon as we get a confident result.
+
+    Uses semantic matching with BERT embeddings for intelligent
+    category detection (e.g., "COSTCO GAS" → gas_stations, not groceries).
     """
 
     def __init__(self):
-        self.pattern_matcher = MerchantPatternMatcher()
+        self.semantic_matcher = get_semantic_matcher()
         self.gemini = GeminiEnrichment()
         self.ntropy = NtropyClient()
         self.settings = get_settings()
 
         # Confidence thresholds
-        self.PATTERN_THRESHOLD = 0.85
-        self.LLM_BASIC_THRESHOLD = 0.75
-        self.LLM_SEARCH_THRESHOLD = 0.70
+        # High confidence = trust rule match, skip LLM (fast & free)
+        # Low confidence = pass to Gemini Flash for verification
+        self.HIGH_CONFIDENCE_THRESHOLD = 0.85  # Trust rule match completely
+        self.MEDIUM_CONFIDENCE_THRESHOLD = 0.70  # Use as hint for LLM
+        self.LLM_BASIC_THRESHOLD = 0.70
+        self.LLM_SEARCH_THRESHOLD = 0.65
 
         # Track costs
         self.total_cost = 0.0
         self.method_counts = {
             "cache": 0,
-            "pattern": 0,
+            "semantic_rule": 0,
+            "semantic_similarity": 0,
             "llm_basic": 0,
+            "llm_cached": 0,  # LLM cache hits
             "llm_search": 0,
             "ntropy": 0
         }
@@ -117,44 +132,88 @@ class CascadeEnrichment:
             })
             return result
 
-        # Step 2: Try pattern matching (FREE)
-        if not force_method or force_method == "pattern":
-            pattern_result = self.pattern_matcher.recognize_merchant(
-                transaction.description
-            )
+        # Step 2: Try semantic + rule matching (FREE)
+        # High confidence matches are returned immediately
+        # Medium/low confidence matches are passed to LLM for verification
+        semantic_result = None
+        semantic_hint = None
 
-            if pattern_result and pattern_result["confidence"] >= self.PATTERN_THRESHOLD:
-                self.method_counts["pattern"] += 1
-                self.total_cost += 0.0
-                result.update({
-                    "merchant": pattern_result["merchant"],
-                    "category": pattern_result["category"],
-                    "confidence": pattern_result["confidence"],
-                    "source": "pattern_matching",
-                    "cost": 0.0,
-                    "method_used": "pattern_matching"
-                })
-                logger.debug("Pattern match", extra={"merchant": pattern_result['merchant']})
-                return result
+        if not force_method or force_method == "semantic":
+            semantic_result = self.semantic_matcher.match(transaction.description)
+
+            if semantic_result:
+                source_type = semantic_result.get("source", "semantic")
+                confidence = semantic_result.get("confidence", 0.0)
+
+                # HIGH CONFIDENCE: Trust rule match completely (fast & free)
+                # Examples: "COSTCO GAS" → gas_stations, "CLAUDE" → software_subscriptions
+                if source_type == "rule_match" and confidence >= self.HIGH_CONFIDENCE_THRESHOLD:
+                    self.method_counts["semantic_rule"] += 1
+                    self.total_cost += 0.0
+                    result.update({
+                        "merchant": semantic_result.get("merchant"),
+                        "category": normalize_category_id(semantic_result.get("category", "other")),
+                        "confidence": confidence,
+                        "source": "semantic_rule",
+                        "cost": 0.0,
+                        "method_used": "semantic_rule",
+                        "matched_pattern": semantic_result.get("matched_pattern")
+                    })
+                    logger.debug("High-confidence rule match", extra={
+                        "merchant": semantic_result.get('merchant'),
+                        "pattern": semantic_result.get('matched_pattern'),
+                        "confidence": confidence
+                    })
+                    return result
+
+                # MEDIUM CONFIDENCE: Save as hint for LLM verification
+                # The LLM will use this as context but make its own decision
+                elif confidence >= self.MEDIUM_CONFIDENCE_THRESHOLD:
+                    semantic_hint = {
+                        "suggested_merchant": semantic_result.get("merchant"),
+                        "suggested_category": semantic_result.get("category"),
+                        "confidence": confidence,
+                        "source": source_type
+                    }
+                    logger.debug("Medium-confidence match, passing to LLM", extra={
+                        "hint": semantic_hint
+                    })
 
         # Step 3: Try Gemini Flash basic (CHEAP & FREE!)
+        # Pass semantic hint if available for better accuracy
         if not force_method or force_method == "llm_basic":
-            llm_result = await self.gemini.enrich_basic(transaction)
+            llm_result = await self.gemini.enrich_basic(transaction, hint=semantic_hint)
 
-            if llm_result and llm_result["confidence"] >= self.LLM_BASIC_THRESHOLD:
-                self.method_counts["llm_basic"] += 1
-                self.total_cost += 0.000075  # FREE tier!
+            if llm_result and llm_result.get("confidence", 0) >= self.LLM_BASIC_THRESHOLD:
+                # Check if this was a cache hit
+                was_cached = llm_result.get("cached", False)
+                if was_cached:
+                    self.method_counts["llm_cached"] += 1
+                    cost = 0.0
+                else:
+                    self.method_counts["llm_basic"] += 1
+                    cost = 0.000075
+                    self.total_cost += cost
+
+                # Category is already normalized in gemini_enrichment
+                method_used = "llm_cached" if was_cached else ("llm_with_hint" if semantic_hint else "llm_basic")
                 result.update({
-                    "merchant": llm_result["merchant"],
-                    "category": llm_result["category"],
+                    "merchant": llm_result.get("merchant"),
+                    "category": llm_result.get("category", "other"),
                     "city": llm_result.get("city"),
                     "state": llm_result.get("state"),
-                    "confidence": llm_result["confidence"],
-                    "source": "gemini_flash",
-                    "cost": 0.000075,
-                    "method_used": "llm_basic"
+                    "confidence": llm_result.get("confidence"),
+                    "source": llm_result.get("source", "gemini_flash"),
+                    "cost": cost,
+                    "method_used": method_used,
+                    "had_hint": semantic_hint is not None,
+                    "cached": was_cached
                 })
-                logger.debug("Gemini Flash enrichment", extra={"merchant": llm_result['merchant']})
+                logger.debug("Gemini Flash enrichment", extra={
+                    "merchant": llm_result.get('merchant'),
+                    "had_hint": semantic_hint is not None,
+                    "cached": was_cached
+                })
                 return result
 
         # Step 4: Try Gemini Flash + Search (MODERATE)
@@ -213,23 +272,19 @@ class CascadeEnrichment:
 
         Returns:
             {
-                "total_cost": 0.71,
+                "total_cost": 0.59,
                 "total_transactions": 791,
-                "cost_per_transaction": 0.0009,
+                "cost_per_transaction": 0.0007,
                 "methods_used": {
                     "cache": 100,
-                    "pattern": 553,
-                    "llm_basic": 158,
-                    "llm_search": 63,
-                    "ntropy": 17
+                    "semantic_rule": 450,
+                    "semantic_similarity": 100,
+                    "llm_basic": 100,
+                    "llm_search": 30,
+                    "ntropy": 11
                 },
-                "cost_by_method": {
-                    "pattern": 0.00,
-                    "llm_basic": 0.04,
-                    "llm_search": 0.33,
-                    "ntropy": 0.34
-                },
-                "savings_vs_ntropy": "95%"
+                "cost_by_method": {...},
+                "savings_vs_ntropy": "96%"
             }
         """
         total_transactions = sum(self.method_counts.values())
@@ -239,17 +294,31 @@ class CascadeEnrichment:
         if ntropy_cost > 0:
             savings_percent = ((ntropy_cost - self.total_cost) / ntropy_cost) * 100
 
+        # Count free methods (semantic matching + LLM cache hits)
+        free_count = (
+            self.method_counts.get("cache", 0) +
+            self.method_counts.get("semantic_rule", 0) +
+            self.method_counts.get("semantic_similarity", 0) +
+            self.method_counts.get("llm_cached", 0)
+        )
+
         return {
             "total_cost": round(self.total_cost, 2),
             "total_transactions": total_transactions,
             "cost_per_transaction": round(self.total_cost / max(total_transactions, 1), 6),
             "methods_used": self.method_counts,
             "cost_by_method": {
-                "pattern": 0.00,
-                "llm_basic": round(self.method_counts["llm_basic"] * 0.000075, 2),
-                "llm_search": round(self.method_counts["llm_search"] * 0.005075, 2),
-                "ntropy": round(self.method_counts["ntropy"] * 0.02, 2)
+                "cache": 0.00,
+                "semantic_rule": 0.00,
+                "semantic_similarity": 0.00,
+                "llm_cached": 0.00,  # Cache hits are free
+                "llm_basic": round(self.method_counts.get("llm_basic", 0) * 0.000075, 4),
+                "llm_search": round(self.method_counts.get("llm_search", 0) * 0.005075, 2),
+                "ntropy": round(self.method_counts.get("ntropy", 0) * 0.02, 2)
             },
+            "free_matches_count": free_count,
+            "free_matches_percent": round((free_count / max(total_transactions, 1)) * 100, 1),
+            "llm_cache_hits": self.method_counts.get("llm_cached", 0),
             "ntropy_cost_would_be": round(ntropy_cost, 2),
             "savings_amount": round(ntropy_cost - self.total_cost, 2),
             "savings_percent": round(savings_percent, 1)
@@ -260,8 +329,10 @@ class CascadeEnrichment:
         self.total_cost = 0.0
         self.method_counts = {
             "cache": 0,
-            "pattern": 0,
+            "semantic_rule": 0,
+            "semantic_similarity": 0,
             "llm_basic": 0,
+            "llm_cached": 0,
             "llm_search": 0,
             "ntropy": 0
         }

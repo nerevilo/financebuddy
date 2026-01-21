@@ -2,14 +2,14 @@
 Test Cascade Enrichment System
 
 Quick test to verify:
-1. Pattern matching works
+1. Semantic/Rule matching works
 2. Claude Haiku enrichment works
 3. Search service works
 4. Cascade flow works correctly
 """
 import asyncio
 from app.services.search_service import SearchService
-from app.services.merchant_patterns import MerchantPatternMatcher
+from app.services.semantic_matcher import SemanticMatcher, get_semantic_matcher
 from app.services.llm_enrichment import LLMEnrichmentService
 from app.services.llm_enrichment_advanced import AdvancedLLMEnrichment
 from app.core.config import get_settings
@@ -24,31 +24,39 @@ class MockTransaction:
         self.enriched_merchant = None
 
 
-async def test_pattern_matching():
-    """Test pattern matching (FREE)"""
+async def test_semantic_matching():
+    """Test semantic/rule matching (FREE)"""
     print("\n" + "="*50)
-    print("TEST 1: Pattern Matching (FREE)")
+    print("TEST 1: Semantic/Rule Matching (FREE)")
     print("="*50)
 
-    matcher = MerchantPatternMatcher()
+    matcher = get_semantic_matcher()
 
     test_cases = [
+        # Standard cases
         "Debit Card Purchase - HARDEE'S 594",
         "DOMINO S 4290",
         "WALMART SUPERCENTER",
+        # KEY FIXES - these should now work correctly
+        "COSTCO GAS 1234",          # Should be gas_stations, NOT groceries
+        "COSTCO WHOLESALE",          # Should be groceries
+        "CLAUDE.AI SUBSCRIPTION",    # Should be software_subscriptions
+        "ANTHROPIC",                 # Should be software_subscriptions
+        "NETFLIX.COM",               # Should be streaming
         "SOME UNKNOWN MERCHANT 123"
     ]
 
     for desc in test_cases:
-        result = matcher.recognize_merchant(desc)
+        result = matcher.match(desc)
         if result:
             print(f"✅ {desc}")
-            print(f"   → Merchant: {result['merchant']}")
+            print(f"   → Merchant: {result.get('merchant', 'N/A')}")
             print(f"   → Category: {result['category']}")
-            print(f"   → Confidence: {result['confidence']}")
+            print(f"   → Source: {result['source']}")
+            print(f"   → Confidence: {result['confidence']:.2f}")
             print(f"   → Cost: $0.00")
         else:
-            print(f"❌ {desc} - No pattern match")
+            print(f"❌ {desc} - No match")
 
 
 async def test_claude_haiku():
@@ -144,9 +152,14 @@ async def test_cascade_full():
     cascade = CascadeEnrichment()
 
     test_transactions = [
-        ("WALMART SUPERCENTER", -45.67),  # Should match pattern
-        ("UNKNOWN COFFEE SHOP", -4.50),   # Should use Claude basic
-        ("HARDEE'S 594", -8.50),          # Should use Claude + search
+        ("WALMART SUPERCENTER", -45.67),      # Should match semantic rule → groceries
+        ("COSTCO GAS 1234", -52.00),          # Should match semantic rule → gas_stations (KEY FIX!)
+        ("COSTCO WHOLESALE", -156.00),        # Should match semantic rule → groceries
+        ("CLAUDE.AI SUBSCRIPTION", -20.00),   # Should match semantic rule → software_subscriptions (KEY FIX!)
+        ("ANTHROPIC", -20.00),                # Should match semantic rule → software_subscriptions
+        ("NETFLIX.COM", -15.99),              # Should match semantic rule → streaming
+        ("UNKNOWN COFFEE SHOP", -4.50),       # Should use LLM basic
+        ("HARDEE'S 594", -8.50),              # Should match semantic rule → fast_food
     ]
 
     for desc, amount in test_transactions:
@@ -180,7 +193,7 @@ async def main():
     print("="*70)
 
     # Test each component
-    await test_pattern_matching()
+    await test_semantic_matching()
     await test_claude_haiku()
     await test_search_service()
     await test_claude_with_search()
