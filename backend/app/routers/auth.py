@@ -75,10 +75,27 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
     """
     user = db.query(User).filter(User.email == credentials.email).first()
 
-    if not user or not user.hashed_password or not verify_password(credentials.password, user.hashed_password):
+    # Always run password verification to prevent timing attacks
+    # If no user, verify against a dummy hash so response time is consistent
+    dummy_hash = "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.VTtYA/gBVK5Li6"
+    password_valid = verify_password(
+        credentials.password,
+        user.hashed_password if user and user.hashed_password else dummy_hash
+    )
+
+    # Determine specific error reason (for logging/monitoring, not exposed to user)
+    error_reason = None
+    if not user:
+        error_reason = "account_not_found"
+    elif not password_valid:
+        error_reason = "invalid_password"
+
+    if error_reason:
+        # Specific reason available for logging/monitoring but not exposed to client
+        # import logging; logging.warning(f"Login failed: {error_reason} for {credentials.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
