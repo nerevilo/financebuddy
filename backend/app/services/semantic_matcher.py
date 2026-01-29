@@ -1,8 +1,9 @@
 """
 Semantic Matching for Intelligent Transaction Categorization
 
-Uses sentence transformers (BERT-based) to understand transaction descriptions
-semantically rather than relying on simple keyword matching.
+Uses FastEmbed (ONNX-based) for lightweight, fast embeddings without PyTorch.
+This is the industry standard for production deployments - ~50x smaller than
+sentence-transformers and optimized for CPU inference.
 
 Key Features:
 1. Pre-computes embeddings for all categories and known merchants
@@ -13,7 +14,6 @@ Key Features:
 import re
 from typing import Dict, List, Optional, Tuple
 from functools import lru_cache
-import numpy as np
 from ..core.logging_config import get_logger
 from .categories import (
     CATEGORIES,
@@ -24,15 +24,17 @@ from .categories import (
 
 logger = get_logger(__name__)
 
-# Try to import sentence-transformers
+# Try to import fastembed (lightweight ONNX-based embeddings)
 try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
+    from fastembed import TextEmbedding
+    import numpy as np
+    FASTEMBED_AVAILABLE = True
 except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
-    SentenceTransformer = None
+    FASTEMBED_AVAILABLE = False
+    TextEmbedding = None
+    np = None
     logger.warning(
-        "sentence-transformers not installed. Run: pip install sentence-transformers. "
+        "fastembed not installed. Run: pip install fastembed. "
         "Falling back to rule-based matching."
     )
 
@@ -41,12 +43,14 @@ class SemanticMatcher:
     """
     Intelligent transaction categorization using semantic similarity.
 
-    Uses sentence-transformers to embed transaction descriptions and find
-    the most semantically similar category.
+    Uses FastEmbed (ONNX-based) to embed transaction descriptions and find
+    the most semantically similar category. Much lighter than PyTorch-based
+    alternatives - ideal for production/serverless deployments.
     """
 
-    # Model to use - MiniLM is fast and accurate for short texts
-    MODEL_NAME = "all-MiniLM-L6-v2"
+    # Model to use - BGE-small is fast, accurate, and lightweight
+    # See: https://github.com/qdrant/fastembed#supported-models
+    MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
     # Confidence thresholds
     HIGH_CONFIDENCE_THRESHOLD = 0.65
@@ -65,36 +69,35 @@ class SemanticMatcher:
         self._build_merchant_database()
 
         # Initialize model lazily
-        if SENTENCE_TRANSFORMERS_AVAILABLE:
+        if FASTEMBED_AVAILABLE:
             self._initialize_model()
 
     def _initialize_model(self):
-        """Initialize the sentence transformer model and pre-compute embeddings"""
+        """Initialize the FastEmbed model and pre-compute embeddings"""
         if self._initialized:
             return
 
         try:
             logger.info(f"Loading semantic model: {self.MODEL_NAME}")
-            self.model = SentenceTransformer(self.MODEL_NAME)
+            self.model = TextEmbedding(model_name=self.MODEL_NAME)
 
             # Pre-compute category embeddings
             category_texts = list(CATEGORY_TEXTS_FOR_EMBEDDING.values())
             category_ids = list(CATEGORY_TEXTS_FOR_EMBEDDING.keys())
 
+            # FastEmbed returns a generator, convert to list of arrays
+            category_embeds = list(self.model.embed(category_texts))
             self.category_embeddings = {
-                cat_id: embedding
-                for cat_id, embedding in zip(
-                    category_ids,
-                    self.model.encode(category_texts, convert_to_numpy=True)
-                )
+                cat_id: np.array(embedding)
+                for cat_id, embedding in zip(category_ids, category_embeds)
             }
 
             # Pre-compute merchant embeddings for known merchants
             merchant_texts = list(self.known_merchants.keys())
             if merchant_texts:
-                merchant_embeds = self.model.encode(merchant_texts, convert_to_numpy=True)
+                merchant_embeds = list(self.model.embed(merchant_texts))
                 self.merchant_embeddings = {
-                    text: embedding
+                    text: np.array(embedding)
                     for text, embedding in zip(merchant_texts, merchant_embeds)
                 }
 
@@ -540,7 +543,7 @@ class SemanticMatcher:
 
     def match_semantic(self, description: str) -> Optional[Dict]:
         """
-        Semantic matching using sentence embeddings.
+        Semantic matching using FastEmbed embeddings.
 
         Embeds the transaction description and finds the most similar category.
 
@@ -559,8 +562,8 @@ class SemanticMatcher:
         try:
             cleaned = self._clean_description(description)
 
-            # Embed the description
-            desc_embedding = self.model.encode(cleaned, convert_to_numpy=True)
+            # Embed the description (FastEmbed returns generator)
+            desc_embedding = np.array(list(self.model.embed([cleaned]))[0])
 
             # Find most similar category
             best_category = None
