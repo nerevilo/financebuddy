@@ -18,12 +18,19 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 import statistics
 import json
+import hashlib
+import time
 
 from ..models.models import Transaction, Account, Institution
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# In-memory cache for anomaly statistics (per-user, with TTL)
+# Structure: {user_id: {"stats": {...}, "expires_at": timestamp, "tx_hash": hash}}
+_stats_cache: Dict[str, Dict] = {}
+STATS_CACHE_TTL = 86400  # 24 hours - statistics don't change frequently
 
 # Optional Gemini import
 try:
@@ -75,8 +82,8 @@ class AnomalyDetectionService:
         if len(transactions) < self.MINIMUM_TRANSACTIONS:
             return []
 
-        # Calculate baseline statistics
-        self._calculate_statistics(transactions)
+        # Calculate baseline statistics (with caching)
+        self._calculate_statistics_cached(transactions)
 
         detected = []
         for txn in transactions:
@@ -93,7 +100,7 @@ class AnomalyDetectionService:
         if len(transactions) < self.MINIMUM_TRANSACTIONS:
             return None
 
-        self._calculate_statistics(transactions)
+        self._calculate_statistics_cached(transactions)
         return self._check_transaction(transaction)
 
     def _get_user_expenses(self, days: int) -> List[Transaction]:
@@ -119,6 +126,47 @@ class AnomalyDetectionService:
                 or_(Transaction.enriched_category.is_(None), ~Transaction.enriched_category.in_(non_spending_enriched_categories)),
             )
         ).order_by(Transaction.date.desc()).all()
+
+    def _compute_transactions_hash(self, transactions: List[Transaction]) -> str:
+        """Compute a hash of transactions for cache invalidation."""
+        # Use count + sum of amounts + latest date as a fast fingerprint
+        if not transactions:
+            return "empty"
+        total = sum(abs(t.amount) for t in transactions)
+        latest = max(t.date for t in transactions)
+        return hashlib.md5(f"{len(transactions)}:{total:.2f}:{latest}".encode()).hexdigest()
+
+    def _calculate_statistics_cached(self, transactions: List[Transaction]) -> None:
+        """
+        Calculate statistics with caching to avoid recalculation.
+
+        Cache is invalidated when:
+        - TTL expires (24 hours)
+        - Transaction fingerprint changes (new transactions added)
+        """
+        global _stats_cache
+
+        tx_hash = self._compute_transactions_hash(transactions)
+        cache_key = self.user_id
+        now = time.time()
+
+        # Check if we have valid cached stats
+        if cache_key in _stats_cache:
+            cached = _stats_cache[cache_key]
+            if cached["expires_at"] > now and cached["tx_hash"] == tx_hash:
+                # Cache hit - restore cached statistics
+                self._stats_cache = cached["stats"].copy()
+                return
+
+        # Cache miss - calculate fresh statistics
+        self._calculate_statistics(transactions)
+
+        # Store in cache
+        _stats_cache[cache_key] = {
+            "stats": self._stats_cache.copy(),
+            "expires_at": now + STATS_CACHE_TTL,
+            "tx_hash": tx_hash
+        }
 
     def _calculate_statistics(self, transactions: List[Transaction]) -> None:
         """Calculate statistical baselines for anomaly detection."""

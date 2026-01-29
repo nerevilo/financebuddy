@@ -33,7 +33,9 @@ from .routers import (
     profile_router,
     anomalies_router,
     tags_router,
-    chat_router
+    chat_router,
+    api_keys_router,
+    llm_api_router,
 )
 
 # Create database tables
@@ -71,7 +73,7 @@ app.add_middleware(
     allow_origin_regex=r"https://.*-renjialans-projects\.vercel\.app",  # All Vercel preview URLs
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-API-Key"],
 )
 
 # Include routers
@@ -90,6 +92,8 @@ app.include_router(profile_router)
 app.include_router(anomalies_router)
 app.include_router(tags_router)
 app.include_router(chat_router)
+app.include_router(api_keys_router)
+app.include_router(llm_api_router)
 
 
 @app.get("/")

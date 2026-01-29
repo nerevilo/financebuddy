@@ -1,35 +1,88 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTransactionsList, useCategories, useTags } from '@/lib/hooks';
-import { updateTransactionCategory, TransactionListParams, TransactionDetail } from '@/lib/api';
+import { updateTransactionCategoryWithRule, checkMerchantRule, TransactionListParams, TransactionDetail, MerchantCheckResponse } from '@/lib/api';
 import { mutate } from 'swr';
-import { AlertTriangle, Filter } from 'lucide-react';
+import { AlertTriangle, Search, X } from 'lucide-react';
 import { UnusualBadge } from './UnusualBadge';
 import { TagBadge } from '@/components/ui/TagBadge';
 import { TransactionDetailModal } from './TransactionDetailModal';
+
+// Custom hook for debounced value
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
 
 type SortField = 'date' | 'amount' | 'merchant' | 'category';
 type SortOrder = 'asc' | 'desc';
 
 interface TransactionsTableProps {
   initialShowUnusualOnly?: boolean;
+  initialMonth?: number | null;
+  initialYear?: number | null;
 }
 
-export function TransactionsTable({ initialShowUnusualOnly = false }: TransactionsTableProps) {
+export function TransactionsTable({
+  initialShowUnusualOnly = false,
+  initialMonth = null,
+  initialYear = null,
+}: TransactionsTableProps) {
   const [sortBy, setSortBy] = useState<SortField>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [page, setPage] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [showUnusualOnly, setShowUnusualOnly] = useState(initialShowUnusualOnly);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [filterMonth, setFilterMonth] = useState<number | null>(initialMonth);
+  const [filterYear, setFilterYear] = useState<number | null>(initialYear);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingCategory, setEditingCategory] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [selectedTransactionId, setSelectedTransactionId] = useState<string | null>(null);
 
+  // Inline rule prompt state
+  const [showInlineRulePrompt, setShowInlineRulePrompt] = useState(false);
+  const [inlineRuleData, setInlineRuleData] = useState<{
+    transactionId: string;
+    merchantName: string;
+    category: string;
+    checkResult: MerchantCheckResponse;
+  } | null>(null);
+
+  // Debounce search query to avoid excessive API calls
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
   const limit = 50;
 
+  // Helper to get month name
+  const getMonthName = (month: number) => {
+    const date = new Date(2000, month - 1, 1);
+    return date.toLocaleString('default', { month: 'long' });
+  };
+
+  // Calculate start_date and end_date from month/year filter
+  const getDateRange = () => {
+    if (filterMonth && filterYear) {
+      const startDate = new Date(filterYear, filterMonth - 1, 1);
+      const endDate = new Date(filterYear, filterMonth, 0); // Last day of the month
+      return {
+        start_date: startDate.toISOString().split('T')[0],
+        end_date: endDate.toISOString().split('T')[0],
+      };
+    }
+    return {};
+  };
+
+  const dateRange = getDateRange();
   const params: TransactionListParams = {
     sort_by: sortBy,
     sort_order: sortOrder,
@@ -38,7 +91,14 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
     ...(categoryFilter && { category: categoryFilter }),
     ...(showUnusualOnly && { show_unusual_only: true }),
     ...(selectedTagIds.length > 0 && { tag_ids: selectedTagIds }),
+    ...(debouncedSearch.length >= 2 && { q: debouncedSearch }),
+    ...dateRange,
   };
+
+  // Reset to page 0 when search changes
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch]);
 
   const { data, isLoading, refresh } = useTransactionsList(params);
   const { categories } = useCategories();
@@ -67,15 +127,41 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
     setEditingCategory(transaction.category || '');
   };
 
-  const handleSaveCategory = async (transactionId: string) => {
+  const handleSaveCategory = async (transactionId: string, merchantName: string | null) => {
     if (!editingCategory) {
       setEditingId(null);
       return;
     }
 
+    // Check for rule opportunity if merchant exists
+    if (merchantName) {
+      try {
+        const checkResult = await checkMerchantRule(merchantName);
+        if (checkResult.matching_transactions > 1) {
+          // Show inline prompt
+          setInlineRuleData({
+            transactionId,
+            merchantName,
+            category: editingCategory,
+            checkResult,
+          });
+          setShowInlineRulePrompt(true);
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to check merchant rule:', err);
+      }
+    }
+
+    // No prompt needed, save directly
+    await saveCategory(transactionId, editingCategory, false);
+  };
+
+  const saveCategory = async (transactionId: string, category: string, applyToAll: boolean) => {
     setIsSaving(true);
+    setShowInlineRulePrompt(false);
     try {
-      await updateTransactionCategory(transactionId, editingCategory);
+      await updateTransactionCategoryWithRule(transactionId, category, applyToAll);
       await refresh();
       await mutate('dashboard');
     } catch (err) {
@@ -83,6 +169,7 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
     } finally {
       setIsSaving(false);
       setEditingId(null);
+      setInlineRuleData(null);
     }
   };
 
@@ -108,10 +195,19 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
     setCategoryFilter('');
     setShowUnusualOnly(false);
     setSelectedTagIds([]);
+    setFilterMonth(null);
+    setFilterYear(null);
+    setSearchQuery('');
     setPage(0);
   };
 
-  const hasActiveFilters = categoryFilter || showUnusualOnly || selectedTagIds.length > 0;
+  const clearMonthFilter = () => {
+    setFilterMonth(null);
+    setFilterYear(null);
+    setPage(0);
+  };
+
+  const hasActiveFilters = categoryFilter || showUnusualOnly || selectedTagIds.length > 0 || (filterMonth && filterYear) || searchQuery;
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortBy !== field) {
@@ -140,9 +236,30 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
         {/* Filters */}
         <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="flex flex-wrap items-center gap-4">
+            {/* Search input */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search transactions..."
+                className="w-64 pl-9 pr-8 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-400 focus:border-transparent bg-white text-slate-700 placeholder:text-slate-400"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 rounded"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
             {/* Transaction count */}
             <div className="text-sm text-slate-600">
               {data.total} transaction{data.total !== 1 ? 's' : ''}
+              {debouncedSearch && ` matching "${debouncedSearch}"`}
             </div>
 
             {/* Unusual filter toggle - Soft Wash Style */}
@@ -222,6 +339,24 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
                 />
               );
             })}
+
+            {/* Month filter badge */}
+            {filterMonth && filterYear && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-sky-500/10 border border-sky-300 text-sky-700 rounded-lg">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                {getMonthName(filterMonth)} {filterYear}
+                <button
+                  onClick={clearMonthFilter}
+                  className="ml-1 hover:bg-sky-200 rounded p-0.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            )}
 
             {/* Clear all filters */}
             {hasActiveFilters && (
@@ -344,7 +479,7 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
                             ))}
                           </select>
                           <button
-                            onClick={() => handleSaveCategory(txn.id)}
+                            onClick={() => handleSaveCategory(txn.id, txn.merchant_name)}
                             disabled={isSaving}
                             className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
                           >
@@ -437,6 +572,64 @@ export function TransactionsTable({ initialShowUnusualOnly = false }: Transactio
         onClose={handleModalClose}
         onUpdated={handleModalUpdate}
       />
+
+      {/* Inline Rule Prompt Dialog */}
+      {showInlineRulePrompt && inlineRuleData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full m-4 overflow-hidden">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl">🏷️</span>
+                <h3 className="text-lg font-bold text-neutral-900">
+                  Apply to all {inlineRuleData.merchantName} transactions?
+                </h3>
+              </div>
+
+              <p className="text-neutral-600 mb-4">
+                {inlineRuleData.checkResult.has_existing_rule ? (
+                  <>
+                    You have an existing rule for this merchant (currently: <span className="font-medium">{inlineRuleData.checkResult.existing_category}</span>).
+                    This will update <span className="font-bold">{inlineRuleData.checkResult.matching_transactions}</span> transactions to &quot;<span className="font-medium">{inlineRuleData.category}</span>&quot;.
+                  </>
+                ) : (
+                  <>
+                    Create a rule to automatically categorize all <span className="font-bold">{inlineRuleData.checkResult.matching_transactions}</span> transactions
+                    from &quot;<span className="font-medium">{inlineRuleData.merchantName}</span>&quot; as &quot;<span className="font-medium">{inlineRuleData.category}</span>&quot;?
+                    This will also apply to future transactions.
+                  </>
+                )}
+              </p>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => saveCategory(inlineRuleData.transactionId, inlineRuleData.category, false)}
+                  disabled={isSaving}
+                  className="px-4 py-2 text-neutral-700 hover:text-neutral-900 font-medium transition"
+                >
+                  Just this one
+                </button>
+                <button
+                  onClick={() => saveCategory(inlineRuleData.transactionId, inlineRuleData.category, true)}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Applying...
+                    </span>
+                  ) : (
+                    `Apply to all (${inlineRuleData.checkResult.matching_transactions})`
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

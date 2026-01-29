@@ -491,6 +491,176 @@ class DashboardService:
 
         return merchants[:limit]
 
+    def get_recurring_payments(self, limit: int = 20) -> Dict:
+        """
+        Detect recurring payments (subscriptions) from transaction history.
+
+        Groups expenses by merchant + similar amount (within 5%) and detects frequency.
+
+        Returns:
+        - recurring_payments: List of detected recurring payments
+        - total_monthly: Estimated total monthly recurring expenses
+        """
+        from collections import defaultdict
+
+        # Get expenses from last 90 days
+        ninety_days_ago = datetime.now() - timedelta(days=90)
+
+        results = self.db.query(Transaction).join(
+            Account, Transaction.account_id == Account.id
+        ).join(
+            Institution, Account.institution_id == Institution.id
+        ).filter(
+            and_(
+                Transaction.date >= ninety_days_ago,
+                Transaction.enriched_merchant.isnot(None),
+                self._is_expense(exclude_one_time=False),
+                self._user_filter()
+            )
+        ).order_by(Transaction.date.desc()).all()
+
+        # Group transactions by merchant
+        merchant_groups = defaultdict(list)
+        for txn in results:
+            merchant = txn.enriched_merchant or txn.merchant_name
+            if merchant:
+                merchant_groups[merchant.lower()].append(txn)
+
+        # Analyze each merchant for recurring patterns
+        recurring_payments = []
+
+        for merchant_key, transactions in merchant_groups.items():
+            if len(transactions) < 2:
+                continue
+
+            # Group by similar amounts (within 5%)
+            amount_groups = self._group_by_similar_amount(transactions)
+
+            for amount_key, txn_group in amount_groups.items():
+                if len(txn_group) < 2:
+                    continue
+
+                # Detect frequency
+                frequency = self._detect_frequency(txn_group)
+                if frequency == 'irregular':
+                    continue
+
+                # Calculate average amount
+                avg_amount = sum(abs(t.amount) for t in txn_group) / len(txn_group)
+
+                # Get the most recent transaction for details
+                latest_txn = max(txn_group, key=lambda t: t.date)
+
+                # Calculate next expected date
+                next_expected = self._calculate_next_date(latest_txn.date, frequency)
+
+                recurring_payments.append({
+                    'merchant': latest_txn.enriched_merchant or latest_txn.merchant_name,
+                    'amount': round(avg_amount, 2),
+                    'frequency': frequency,
+                    'category': latest_txn.enriched_category,
+                    'last_date': latest_txn.date.isoformat() if latest_txn.date else None,
+                    'next_expected': next_expected.isoformat() if next_expected else None,
+                    'occurrences': len(txn_group),
+                    'emoji': self._get_category_emoji(latest_txn.enriched_category)
+                })
+
+        # Sort by amount (highest first)
+        recurring_payments.sort(key=lambda x: x['amount'], reverse=True)
+
+        # Calculate total monthly recurring
+        total_monthly = 0
+        for payment in recurring_payments:
+            if payment['frequency'] == 'weekly':
+                total_monthly += payment['amount'] * 4.33
+            elif payment['frequency'] == 'biweekly':
+                total_monthly += payment['amount'] * 2.17
+            elif payment['frequency'] == 'monthly':
+                total_monthly += payment['amount']
+            elif payment['frequency'] == 'yearly':
+                total_monthly += payment['amount'] / 12
+
+        return {
+            'recurring_payments': recurring_payments[:limit],
+            'total_monthly': round(total_monthly, 2),
+            'count': len(recurring_payments)
+        }
+
+    def _group_by_similar_amount(self, transactions: List) -> Dict:
+        """Group transactions by similar amounts (within 5% tolerance)."""
+        from collections import defaultdict
+
+        groups = defaultdict(list)
+
+        for txn in transactions:
+            amount = abs(txn.amount)
+            matched = False
+
+            for key, group in groups.items():
+                if group:
+                    avg = sum(abs(t.amount) for t in group) / len(group)
+                    if avg > 0 and abs(amount - avg) / avg < 0.05:
+                        groups[key].append(txn)
+                        matched = True
+                        break
+
+            if not matched:
+                groups[round(amount, 2)].append(txn)
+
+        return groups
+
+    def _detect_frequency(self, transactions: List) -> str:
+        """Detect payment frequency from transaction dates."""
+        if len(transactions) < 2:
+            return "irregular"
+
+        dates = sorted([t.date for t in transactions if t.date])
+        if len(dates) < 2:
+            return "irregular"
+
+        gaps = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
+        avg_gap = sum(gaps) / len(gaps)
+
+        # Check consistency (standard deviation should be low for regular payments)
+        if len(gaps) >= 2:
+            variance = sum((g - avg_gap) ** 2 for g in gaps) / len(gaps)
+            std_dev = variance ** 0.5
+            # If std dev is more than 30% of avg gap, it's irregular
+            if avg_gap > 0 and std_dev / avg_gap > 0.3:
+                return "irregular"
+
+        if 5 <= avg_gap <= 9:
+            return "weekly"
+        elif 12 <= avg_gap <= 16:
+            return "biweekly"
+        elif 26 <= avg_gap <= 35:
+            return "monthly"
+        elif 350 <= avg_gap <= 380:
+            return "yearly"
+        else:
+            return "irregular"
+
+    def _calculate_next_date(self, last_date, frequency: str) -> Optional[datetime]:
+        """Calculate next expected payment date."""
+        if not last_date:
+            return None
+
+        days_map = {
+            'weekly': 7,
+            'biweekly': 14,
+            'monthly': 30,
+            'yearly': 365,
+        }
+
+        days = days_map.get(frequency)
+        if days:
+            next_date = last_date + timedelta(days=days)
+            # If next date is in the past, calculate from today
+            while next_date < datetime.now().date():
+                next_date += timedelta(days=days)
+            return next_date
+        return None
+
     def get_transactions_by_period(self, period: str = 'month', date: Optional[datetime] = None) -> List[Dict]:
         """
         Get transactions for a specific time period
@@ -596,6 +766,7 @@ class DashboardService:
         - Daily spending data points with cumulative totals
         - Budget pace line (linear projection)
         - Last month comparison line
+        - Top 3 categories per day for tooltip
         """
         now = datetime.now()
         month_start = datetime(now.year, now.month, 1)
@@ -622,6 +793,43 @@ class DashboardService:
                 self._user_filter()
             )
         ).group_by(func.date(Transaction.date)).order_by(func.date(Transaction.date)).all()
+
+        # Get daily spending by category for this month (for tooltip)
+        this_month_by_category = self.db.query(
+            func.date(Transaction.date).label('day'),
+            Transaction.enriched_category,
+            func.sum(func.abs(Transaction.amount)).label('total')
+        ).join(Account, Transaction.account_id == Account.id).join(
+            Institution, Account.institution_id == Institution.id
+        ).filter(
+            and_(
+                Transaction.date >= month_start,
+                Transaction.date < now + timedelta(days=1),
+                Transaction.enriched_merchant.isnot(None),
+                Transaction.enriched_category.isnot(None),
+                self._is_expense(),
+                self._user_filter()
+            )
+        ).group_by(
+            func.date(Transaction.date),
+            Transaction.enriched_category
+        ).all()
+
+        # Build lookup for top categories per day
+        daily_categories = {}
+        for row in this_month_by_category:
+            day_str = row.day.strftime('%Y-%m-%d') if hasattr(row.day, 'strftime') else str(row.day)
+            if day_str not in daily_categories:
+                daily_categories[day_str] = []
+            daily_categories[day_str].append({
+                'category': row.enriched_category,
+                'amount': float(row.total)
+            })
+
+        # Sort and keep top 3 per day
+        for day_str in daily_categories:
+            daily_categories[day_str].sort(key=lambda x: x['amount'], reverse=True)
+            daily_categories[day_str] = daily_categories[day_str][:3]
 
         # Get daily spending for last month (full month)
         last_month_daily = self.db.query(
@@ -662,7 +870,8 @@ class DashboardService:
                 'date': day_str,
                 'daily': daily_amount,
                 'cumulative': cumulative,
-                'budget_pace': daily_budget_pace * day_num
+                'budget_pace': daily_budget_pace * day_num,
+                'top_categories': daily_categories.get(day_str, [])
             })
 
         # Build cumulative data for last month (for comparison)

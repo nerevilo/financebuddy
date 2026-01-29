@@ -4,8 +4,8 @@ Analytics Router
 API endpoints for spending analysis and insights.
 """
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, extract
+from sqlalchemy.orm import Session, Query as SQLQuery
+from sqlalchemy import func, and_, extract, or_, not_
 from typing import Optional
 from datetime import date, timedelta
 from collections import defaultdict
@@ -17,6 +17,49 @@ from ..schemas import SpendingByCategory, SpendingByMerchant
 from ..services.categorization import TransferDetector
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def apply_transfer_filters(query: SQLQuery) -> SQLQuery:
+    """
+    Apply SQL-level filters to exclude obvious transfers.
+
+    This filters out:
+    - Transactions with teller_category = 'transfer'
+    - Transactions flagged as is_transfer = True
+    - Common transfer patterns in description
+
+    More complex transfer detection (account matching, custom rules)
+    still happens in Python for edge cases.
+    """
+    # Categories that indicate transfers (not real spending)
+    transfer_categories = ['transfer', 'investment']
+
+    # Common transfer keywords to filter at SQL level
+    transfer_keywords = [
+        '%CREDIT CARD PAYMENT%', '%CC PAYMENT%', '%CARD PAYMENT%',
+        '%INTERNAL TRANSFER%', '%BETWEEN ACCOUNTS%',
+        '%LOAN PAYMENT%', '%MORTGAGE PAYMENT%'
+    ]
+
+    # Base exclusions
+    query = query.filter(
+        or_(
+            Transaction.teller_category.is_(None),
+            not_(Transaction.teller_category.in_(transfer_categories))
+        )
+    ).filter(
+        or_(
+            Transaction.is_transfer.is_(None),
+            Transaction.is_transfer == False
+        )
+    )
+
+    # Build OR condition for keyword exclusions
+    keyword_conditions = [Transaction.description.ilike(kw) for kw in transfer_keywords]
+    if keyword_conditions:
+        query = query.filter(not_(or_(*keyword_conditions)))
+
+    return query
 
 
 def get_date_range(period: str) -> tuple[date, date]:
@@ -75,11 +118,12 @@ async def get_spending_by_category(
     else:
         start, end = get_date_range(period)
 
-    # Initialize transfer detector with database session for account matching
-    transfer_detector = TransferDetector(db=db)
-
-    # Get all expense transactions (negative amounts) for current user
-    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+    # Use SQL aggregation instead of loading all transactions into memory
+    base_query = db.query(
+        func.coalesce(Transaction.teller_category, 'uncategorized').label('category'),
+        func.sum(func.abs(Transaction.amount)).label('total'),
+        func.count(Transaction.id).label('count')
+    ).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
             Institution.user_id == current_user.id,
@@ -87,38 +131,32 @@ async def get_spending_by_category(
             Transaction.date <= end,
             Transaction.amount < 0  # Expenses are negative
         )
+    )
+
+    # Apply SQL-level transfer filters
+    base_query = apply_transfer_filters(base_query)
+
+    # Group by category and execute
+    results = base_query.group_by(
+        func.coalesce(Transaction.teller_category, 'uncategorized')
     ).all()
 
-    # Filter out transfers (they're not real spending)
-    spending_transactions = [
-        tx for tx in transactions
-        if not transfer_detector.is_transfer(tx)
-    ]
-
-    # Aggregate by category
-    category_totals = defaultdict(lambda: {"total": 0, "count": 0})
-
-    for tx in spending_transactions:
-        category = tx.teller_category or "uncategorized"
-        category_totals[category]["total"] += abs(tx.amount)
-        category_totals[category]["count"] += 1
-
     # Calculate percentages
-    grand_total = sum(cat["total"] for cat in category_totals.values())
+    grand_total = sum(r.total for r in results) if results else 0
 
     result = []
-    for category, data in sorted(category_totals.items(), key=lambda x: x[1]["total"], reverse=True):
-        percentage = (data["total"] / grand_total * 100) if grand_total > 0 else 0
+    for r in sorted(results, key=lambda x: x.total, reverse=True):
+        percentage = (r.total / grand_total * 100) if grand_total > 0 else 0
         result.append(SpendingByCategory(
-            category=category,
-            total=round(data["total"], 2),
-            count=data["count"],
+            category=r.category,
+            total=round(float(r.total), 2),
+            count=r.count,
             percentage=round(percentage, 1)
         ))
 
     return {
         "period": {"start": start.isoformat(), "end": end.isoformat()},
-        "total_spending": round(grand_total, 2),
+        "total_spending": round(float(grand_total), 2),
         "categories": result
     }
 
@@ -142,11 +180,16 @@ async def get_spending_by_merchant(
     else:
         start, end = get_date_range(period)
 
-    # Initialize transfer detector with database session for account matching
-    transfer_detector = TransferDetector(db=db)
-
-    # Get all expense transactions for current user
-    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+    # Use SQL aggregation with COALESCE for merchant name
+    base_query = db.query(
+        func.coalesce(
+            Transaction.merchant_name,
+            func.substring(Transaction.description, 1, 30),
+            'Unknown'
+        ).label('merchant'),
+        func.sum(func.abs(Transaction.amount)).label('total'),
+        func.count(Transaction.id).label('count')
+    ).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
             Institution.user_id == current_user.id,
@@ -154,40 +197,48 @@ async def get_spending_by_merchant(
             Transaction.date <= end,
             Transaction.amount < 0
         )
-    ).all()
+    )
 
-    # Filter out transfers (they're not real spending)
-    spending_transactions = [
-        tx for tx in transactions
-        if not transfer_detector.is_transfer(tx)
-    ]
+    # Apply SQL-level transfer filters
+    base_query = apply_transfer_filters(base_query)
 
-    # Aggregate by merchant
-    merchant_totals = defaultdict(lambda: {"total": 0, "count": 0})
+    # Group by merchant, order by total, and limit
+    results = base_query.group_by(
+        func.coalesce(
+            Transaction.merchant_name,
+            func.substring(Transaction.description, 1, 30),
+            'Unknown'
+        )
+    ).order_by(func.sum(func.abs(Transaction.amount)).desc()).limit(limit).all()
 
-    for tx in spending_transactions:
-        merchant = tx.merchant_name or tx.description[:30] or "Unknown"
-        merchant_totals[merchant]["total"] += abs(tx.amount)
-        merchant_totals[merchant]["count"] += 1
-
-    # Calculate percentages and sort
-    grand_total = sum(m["total"] for m in merchant_totals.values())
+    # Calculate grand total for percentages
+    total_query = db.query(
+        func.sum(func.abs(Transaction.amount))
+    ).join(Account).join(Institution).filter(
+        and_(
+            Institution.status == "active",
+            Institution.user_id == current_user.id,
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.amount < 0
+        )
+    )
+    total_query = apply_transfer_filters(total_query)
+    grand_total = total_query.scalar() or 0
 
     result = []
-    sorted_merchants = sorted(merchant_totals.items(), key=lambda x: x[1]["total"], reverse=True)
-
-    for merchant, data in sorted_merchants[:limit]:
-        percentage = (data["total"] / grand_total * 100) if grand_total > 0 else 0
+    for r in results:
+        percentage = (float(r.total) / float(grand_total) * 100) if grand_total > 0 else 0
         result.append(SpendingByMerchant(
-            merchant=merchant,
-            total=round(data["total"], 2),
-            count=data["count"],
+            merchant=r.merchant,
+            total=round(float(r.total), 2),
+            count=r.count,
             percentage=round(percentage, 1)
         ))
 
     return {
         "period": {"start": start.isoformat(), "end": end.isoformat()},
-        "total_spending": round(grand_total, 2),
+        "total_spending": round(float(grand_total), 2),
         "merchants": result
     }
 
@@ -200,49 +251,57 @@ async def get_spending_trends(
     current_user: User = Depends(get_current_user)
 ):
     """Get spending trends over time."""
-    start_date = date.today() - timedelta(days=months * 30)
+    start_date_val = date.today() - timedelta(days=months * 30)
 
-    # Initialize transfer detector with database session for account matching
-    transfer_detector = TransferDetector(db=db)
+    # Determine period extraction based on granularity
+    if granularity == "monthly":
+        period_expr = func.to_char(Transaction.date, 'YYYY-MM')
+    elif granularity == "weekly":
+        period_expr = func.to_char(Transaction.date, 'YYYY-"W"IW')
+    else:  # daily
+        period_expr = func.to_char(Transaction.date, 'YYYY-MM-DD')
 
-    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+    # Query for income (positive amounts)
+    income_query = db.query(
+        period_expr.label('period'),
+        func.sum(Transaction.amount).label('income')
+    ).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
             Institution.user_id == current_user.id,
-            Transaction.date >= start_date
+            Transaction.date >= start_date_val,
+            Transaction.amount > 0
         )
-    ).all()
+    )
+    income_query = apply_transfer_filters(income_query)
+    income_results = {r.period: float(r.income) for r in income_query.group_by(period_expr).all()}
 
-    # Filter out transfers
-    non_transfer_transactions = [
-        tx for tx in transactions
-        if not transfer_detector.is_transfer(tx)
-    ]
+    # Query for expenses (negative amounts)
+    expense_query = db.query(
+        period_expr.label('period'),
+        func.sum(func.abs(Transaction.amount)).label('expenses')
+    ).join(Account).join(Institution).filter(
+        and_(
+            Institution.status == "active",
+            Institution.user_id == current_user.id,
+            Transaction.date >= start_date_val,
+            Transaction.amount < 0
+        )
+    )
+    expense_query = apply_transfer_filters(expense_query)
+    expense_results = {r.period: float(r.expenses) for r in expense_query.group_by(period_expr).all()}
 
-    # Aggregate by period
-    period_data = defaultdict(lambda: {"income": 0, "expenses": 0})
-
-    for tx in non_transfer_transactions:
-        if granularity == "monthly":
-            period_key = tx.date.strftime("%Y-%m")
-        elif granularity == "weekly":
-            # Get ISO week number
-            period_key = tx.date.strftime("%Y-W%W")
-        else:  # daily
-            period_key = tx.date.isoformat()
-
-        if tx.amount > 0:
-            period_data[period_key]["income"] += tx.amount
-        else:
-            period_data[period_key]["expenses"] += abs(tx.amount)
-
+    # Combine results
+    all_periods = set(income_results.keys()) | set(expense_results.keys())
     result = []
-    for period, data in sorted(period_data.items()):
+    for period in sorted(all_periods):
+        income = income_results.get(period, 0)
+        expenses = expense_results.get(period, 0)
         result.append({
             "period": period,
-            "income": round(data["income"], 2),
-            "expenses": round(data["expenses"], 2),
-            "net": round(data["income"] - data["expenses"], 2)
+            "income": round(income, 2),
+            "expenses": round(expenses, 2),
+            "net": round(income - expenses, 2)
         })
 
     return {"granularity": granularity, "trends": result}
@@ -257,89 +316,57 @@ async def get_period_comparison(
     """Compare spending between current and previous period."""
     current_start, current_end = get_date_range(current_period)
 
-    # Initialize transfer detector with database session for account matching
-    transfer_detector = TransferDetector(db=db)
-
     # Calculate previous period
     period_length = (current_end - current_start).days
     previous_end = current_start - timedelta(days=1)
     previous_start = previous_end - timedelta(days=period_length)
 
-    # Get current period transactions for current user
-    current_all_txs = db.query(Transaction).join(Account).join(Institution).filter(
-        and_(
-            Institution.status == "active",
-            Institution.user_id == current_user.id,
-            Transaction.date >= current_start,
-            Transaction.date <= current_end,
-            Transaction.amount < 0
+    def get_period_totals(start: date, end: date):
+        """Get total spending and by-category breakdown using SQL aggregation."""
+        # Total spending
+        total_query = db.query(
+            func.sum(func.abs(Transaction.amount))
+        ).join(Account).join(Institution).filter(
+            and_(
+                Institution.status == "active",
+                Institution.user_id == current_user.id,
+                Transaction.date >= start,
+                Transaction.date <= end,
+                Transaction.amount < 0
+            )
         )
-    ).all()
+        total_query = apply_transfer_filters(total_query)
+        total = total_query.scalar() or 0
 
-    # Filter out transfers and calculate spending
-    current_spending_filtered = [tx for tx in current_all_txs if not transfer_detector.is_transfer(tx)]
-    current_spending = sum(abs(tx.amount) for tx in current_spending_filtered)
-
-    # Get previous period transactions for current user
-    previous_all_txs = db.query(Transaction).join(Account).join(Institution).filter(
-        and_(
-            Institution.status == "active",
-            Institution.user_id == current_user.id,
-            Transaction.date >= previous_start,
-            Transaction.date <= previous_end,
-            Transaction.amount < 0
+        # By category
+        cat_query = db.query(
+            func.coalesce(Transaction.teller_category, 'uncategorized').label('category'),
+            func.sum(func.abs(Transaction.amount)).label('total')
+        ).join(Account).join(Institution).filter(
+            and_(
+                Institution.status == "active",
+                Institution.user_id == current_user.id,
+                Transaction.date >= start,
+                Transaction.date <= end,
+                Transaction.amount < 0
+            )
         )
-    ).all()
+        cat_query = apply_transfer_filters(cat_query)
+        by_cat = {r.category: float(r.total) for r in cat_query.group_by(
+            func.coalesce(Transaction.teller_category, 'uncategorized')
+        ).all()}
 
-    # Filter out transfers and calculate spending
-    previous_spending_filtered = [tx for tx in previous_all_txs if not transfer_detector.is_transfer(tx)]
-    previous_spending = sum(abs(tx.amount) for tx in previous_spending_filtered)
+        return float(total), by_cat
+
+    current_spending, current_by_cat = get_period_totals(current_start, current_end)
+    previous_spending, previous_by_cat = get_period_totals(previous_start, previous_end)
 
     change_amount = current_spending - previous_spending
     change_percentage = (change_amount / previous_spending * 100) if previous_spending > 0 else 0
 
-    # Get category comparison
-    categories_comparison = []
-
-    # Current period by category
-    current_by_cat = defaultdict(float)
-    current_txs = db.query(Transaction).join(Account).join(Institution).filter(
-        and_(
-            Institution.status == "active",
-            Institution.user_id == current_user.id,
-            Transaction.date >= current_start,
-            Transaction.date <= current_end,
-            Transaction.amount < 0
-        )
-    ).all()
-
-    # Filter out transfers
-    current_spending_txs = [tx for tx in current_txs if not transfer_detector.is_transfer(tx)]
-
-    for tx in current_spending_txs:
-        cat = tx.teller_category or "uncategorized"
-        current_by_cat[cat] += abs(tx.amount)
-
-    # Previous period by category
-    previous_by_cat = defaultdict(float)
-    previous_txs = db.query(Transaction).join(Account).join(Institution).filter(
-        and_(
-            Institution.status == "active",
-            Institution.user_id == current_user.id,
-            Transaction.date >= previous_start,
-            Transaction.date <= previous_end,
-            Transaction.amount < 0
-        )
-    ).all()
-
-    # Filter out transfers
-    previous_spending_txs = [tx for tx in previous_txs if not transfer_detector.is_transfer(tx)]
-
-    for tx in previous_spending_txs:
-        cat = tx.teller_category or "uncategorized"
-        previous_by_cat[cat] += abs(tx.amount)
-
+    # Build category comparison
     all_categories = set(current_by_cat.keys()) | set(previous_by_cat.keys())
+    categories_comparison = []
 
     for cat in all_categories:
         curr = current_by_cat.get(cat, 0)
@@ -378,26 +405,36 @@ async def get_income_expenses(
     """Get income vs expenses summary."""
     start, end = get_date_range(period)
 
-    # Initialize transfer detector with database session for account matching
-    transfer_detector = TransferDetector(db=db)
-
-    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+    # Query for income using SQL aggregation
+    income_query = db.query(
+        func.sum(Transaction.amount)
+    ).join(Account).join(Institution).filter(
         and_(
             Institution.status == "active",
             Institution.user_id == current_user.id,
             Transaction.date >= start,
-            Transaction.date <= end
+            Transaction.date <= end,
+            Transaction.amount > 0
         )
-    ).all()
+    )
+    income_query = apply_transfer_filters(income_query)
+    income = float(income_query.scalar() or 0)
 
-    # Filter out transfers (they're not real income or expenses)
-    non_transfer_transactions = [
-        tx for tx in transactions
-        if not transfer_detector.is_transfer(tx)
-    ]
+    # Query for expenses using SQL aggregation
+    expense_query = db.query(
+        func.sum(func.abs(Transaction.amount))
+    ).join(Account).join(Institution).filter(
+        and_(
+            Institution.status == "active",
+            Institution.user_id == current_user.id,
+            Transaction.date >= start,
+            Transaction.date <= end,
+            Transaction.amount < 0
+        )
+    )
+    expense_query = apply_transfer_filters(expense_query)
+    expenses = float(expense_query.scalar() or 0)
 
-    income = sum(tx.amount for tx in non_transfer_transactions if tx.amount > 0)
-    expenses = sum(abs(tx.amount) for tx in non_transfer_transactions if tx.amount < 0)
     net = income - expenses
     savings_rate = (net / income * 100) if income > 0 else 0
 

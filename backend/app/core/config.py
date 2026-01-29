@@ -56,6 +56,19 @@ class Settings(BaseSettings):
     # Redis Cache (optional - app works without it)
     redis_url: Optional[str] = None  # e.g., "redis://localhost:6379/0"
 
+    # SMTP Email Configuration
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Finance Buddy"
+    smtp_use_tls: bool = True
+
+    # Password Reset
+    password_reset_token_expire_minutes: int = 15
+    frontend_url: str = "http://localhost:3000"
+
     @field_validator("secret_key")
     @classmethod
     def validate_secret_key(cls, v, info):

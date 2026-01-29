@@ -23,6 +23,22 @@ class TokenRefresh(BaseModel):
     refresh_token: str
 
 
+class PasswordResetRequest(BaseModel):
+    """Request to initiate password reset."""
+    email: str
+
+
+class PasswordResetConfirm(BaseModel):
+    """Request to complete password reset with new password."""
+    token: str
+    new_password: str
+
+
+class PasswordResetResponse(BaseModel):
+    """Response for password reset operations."""
+    message: str
+
+
 class TokenResponse(BaseModel):
     """Response containing access and refresh tokens."""
     access_token: str
@@ -154,6 +170,50 @@ class CategoryResponse(BaseModel):
 
 class TransactionCategoryUpdate(BaseModel):
     category: str
+
+
+# ==================== Merchant Category Rule Schemas ====================
+
+class CategoryUpdateWithRuleRequest(BaseModel):
+    """Extended category update that can optionally create a rule."""
+    category: str
+    apply_to_all: bool = False  # If True, create rule and apply to existing transactions
+
+
+class CategoryUpdateWithRuleResponse(BaseModel):
+    """Response from category update with optional rule creation."""
+    transaction: "TransactionDetailResponse"
+    rule_created: bool = False
+    rule_id: Optional[str] = None
+    transactions_updated: int = 0
+
+
+class MerchantCheckResponse(BaseModel):
+    """Response from checking a merchant for rule opportunities."""
+    merchant_name: str
+    has_existing_rule: bool
+    existing_category: Optional[str] = None
+    matching_transactions: int
+
+
+class MerchantCategoryRuleResponse(BaseModel):
+    """Response containing rule information."""
+    id: str
+    merchant_name: str
+    category: str
+    is_active: bool
+    times_applied: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class MerchantCategoryRulesListResponse(BaseModel):
+    """Response containing all rules for a user."""
+    rules: List[MerchantCategoryRuleResponse]
+    total: int
 
 
 # ==================== Paginated Transaction Schemas ====================

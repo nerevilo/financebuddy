@@ -1,27 +1,35 @@
 """
 Authentication Router
 
-Handles user registration, login, token refresh, and current user info.
+Handles user registration, login, token refresh, password reset, and current user info.
 Rate limiting is applied to protect against brute force attacks.
 """
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.security import (
     verify_password, get_password_hash,
-    create_access_token, create_refresh_token, decode_token
+    create_access_token, create_refresh_token, decode_token,
+    create_password_reset_token, verify_password_reset_token
 )
 from ..core.auth import get_current_user
 from ..core.rate_limiter import (
     limiter,
     REGISTER_RATE_LIMIT,
     LOGIN_RATE_LIMIT,
-    REFRESH_RATE_LIMIT
+    REFRESH_RATE_LIMIT,
+    PASSWORD_RESET_REQUEST_LIMIT,
+    PASSWORD_RESET_CONFIRM_LIMIT
 )
 from ..models import User
 from ..models.models import generate_uuid
-from ..schemas import UserRegister, UserLogin, TokenRefresh, TokenResponse, UserResponse
+from ..schemas import (
+    UserRegister, UserLogin, TokenRefresh, TokenResponse, UserResponse,
+    PasswordResetRequest, PasswordResetConfirm, PasswordResetResponse
+)
+from ..services.email_service import EmailService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -161,3 +169,68 @@ async def get_me(current_user: User = Depends(get_current_user)):
     Get current authenticated user info.
     """
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/forgot-password", response_model=PasswordResetResponse)
+@limiter.limit(PASSWORD_RESET_REQUEST_LIMIT)
+async def forgot_password(
+    request: Request,
+    body: PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Request a password reset email.
+
+    Always returns success message to prevent email enumeration.
+    Rate limited to 3 requests per minute per IP.
+    """
+    # Look up user (but don't reveal if they exist)
+    user = db.query(User).filter(User.email == body.email).first()
+
+    if user and user.is_active:
+        # Generate reset token and send email
+        reset_token = create_password_reset_token(body.email)
+        await EmailService.send_password_reset_email(body.email, reset_token)
+
+    # Always return same response to prevent enumeration
+    return PasswordResetResponse(
+        message="If an account exists with that email, you will receive a password reset link."
+    )
+
+
+@router.post("/reset-password", response_model=PasswordResetResponse)
+@limiter.limit(PASSWORD_RESET_CONFIRM_LIMIT)
+async def reset_password(
+    request: Request,
+    body: PasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    """
+    Reset password using the token from email.
+
+    Rate limited to 5 requests per minute per IP.
+    """
+    # Verify token
+    email = verify_password_reset_token(body.token)
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    # Find user
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    # Update password
+    user.hashed_password = get_password_hash(body.new_password)
+    user.updated_at = datetime.utcnow()
+    db.commit()
+
+    return PasswordResetResponse(message="Password has been reset successfully")

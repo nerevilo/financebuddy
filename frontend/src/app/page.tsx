@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { AccountsSummary } from '@/components/dashboard';
 import { CategoryBreakdownWidget } from '@/components/dashboard/CategoryBreakdownWidget';
 import { TopMerchantsWidget } from '@/components/dashboard/TopMerchantsWidget';
+import { RecurringPaymentsWidget } from '@/components/dashboard/RecurringPaymentsWidget';
 import { DailyTransactionsTimeline } from '@/components/dashboard/DailyTransactionsTimeline';
 import { InstitutionSidebar } from '@/components/dashboard/InstitutionSidebar';
 import { SpendingTrendChart } from '@/components/dashboard/SpendingTrendChart';
@@ -194,6 +195,11 @@ function DashboardContent() {
 
               {/* Goal Suggestions from AI */}
               <GoalSuggestionsCard />
+
+              {/* Recurring Payments */}
+              {dashboardData?.recurring_payments && (
+                <RecurringPaymentsWidget data={dashboardData.recurring_payments} />
+              )}
 
               {/* Unusual Transactions Alert - links to transactions page */}
               {totalUnreviewed > 0 && (

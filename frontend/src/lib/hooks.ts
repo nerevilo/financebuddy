@@ -44,6 +44,14 @@ import {
   ConversationSummary,
   ChatMessage,
   ChatResponse,
+  // API Keys
+  getAPIKeys,
+  createAPIKey,
+  revokeAPIKey,
+  APIKey,
+  APIKeyCreated,
+  APIKeyCreate,
+  APIKeyListResponse,
 } from './api';
 
 // Global refresh - invalidates all SWR caches
@@ -507,5 +515,41 @@ export function useChat(conversationId: string | null) {
     error,
     sendMessage: handleSendMessage,
     refresh: mutateChat,
+  };
+}
+
+// ==================== API Keys hooks ====================
+
+// API Keys hook - for managing API keys
+export function useApiKeys() {
+  const { data, error, isLoading, mutate: mutateKeys } = useSWR<APIKeyListResponse>(
+    'api-keys',
+    getAPIKeys,
+    {
+      ...swrConfig,
+      dedupingInterval: 30000, // Cache for 30 seconds
+      revalidateOnFocus: false,
+    }
+  );
+
+  const handleCreateKey = async (keyData: APIKeyCreate): Promise<APIKeyCreated> => {
+    const newKey = await createAPIKey(keyData);
+    mutateKeys();
+    return newKey;
+  };
+
+  const handleRevokeKey = async (keyId: string): Promise<void> => {
+    await revokeAPIKey(keyId);
+    mutateKeys();
+  };
+
+  return {
+    keys: data?.keys || [],
+    total: data?.total || 0,
+    isLoading,
+    error,
+    createKey: handleCreateKey,
+    revokeKey: handleRevokeKey,
+    refresh: mutateKeys,
   };
 }

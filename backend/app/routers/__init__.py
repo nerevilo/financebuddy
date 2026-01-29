@@ -13,6 +13,8 @@ from .profile import router as profile_router
 from .anomalies import router as anomalies_router
 from .tags import router as tags_router
 from .chat import router as chat_router
+from .api_keys import router as api_keys_router
+from .llm_api import router as llm_api_router
 
 __all__ = [
     "auth_router",
@@ -29,5 +31,7 @@ __all__ = [
     "profile_router",
     "anomalies_router",
     "tags_router",
-    "chat_router"
+    "chat_router",
+    "api_keys_router",
+    "llm_api_router",
 ]

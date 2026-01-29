@@ -4,18 +4,20 @@ Transactions Router
 API endpoints for managing and querying transactions.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, desc, asc
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import and_, or_, func, desc, asc
 from typing import List, Optional, Literal
 from datetime import date, datetime, timedelta
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
 from ..core.cache import get_cache, CacheService
-from ..models import Transaction, Account, Institution, User, TransactionTag, TransactionTagAssociation
+from ..models import Transaction, Account, Institution, User, TransactionTag, TransactionTagAssociation, MerchantCategoryRule
 from ..schemas import (
     TransactionResponse, TransactionCategoryUpdate, TransactionListResponse, CategoryResponse,
-    TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse, TagResponse
+    TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse, TagResponse,
+    CategoryUpdateWithRuleRequest, CategoryUpdateWithRuleResponse, MerchantCheckResponse,
+    MerchantCategoryRuleResponse, MerchantCategoryRulesListResponse
 )
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -186,6 +188,7 @@ async def get_transactions_paginated(
     sort_order: Literal["asc", "desc"] = "desc",
     show_unusual_only: bool = False,
     tag_ids: Optional[str] = Query(None, description="Comma-separated tag IDs"),
+    q: Optional[str] = Query(None, min_length=2, description="Search query for description/merchant"),
     limit: int = Query(default=50, le=500),
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -198,9 +201,12 @@ async def get_transactions_paginated(
     - sort_order: Sort direction (asc, desc)
     - show_unusual_only: Filter to show only unusual transactions
     - tag_ids: Comma-separated list of tag IDs to filter by
+    - q: Search query (searches description, merchant_name, enriched_merchant)
     - Returns total count and anomaly count for UI
     """
-    base_query = db.query(Transaction).join(Account).join(Institution).filter(
+    base_query = db.query(Transaction).join(Account).join(Institution).options(
+        selectinload(Transaction.tags)  # Eager load tags to prevent N+1
+    ).filter(
         and_(
             Institution.status == "active",
             Institution.user_id == current_user.id
@@ -230,6 +236,17 @@ async def get_transactions_paginated(
             base_query = base_query.join(TransactionTagAssociation).filter(
                 TransactionTagAssociation.tag_id.in_(tag_id_list)
             ).distinct()
+
+    # Search filter (description, merchant_name, enriched_merchant)
+    if q:
+        search_term = f"%{q}%"
+        base_query = base_query.filter(
+            or_(
+                Transaction.description.ilike(search_term),
+                Transaction.merchant_name.ilike(search_term),
+                Transaction.enriched_merchant.ilike(search_term)
+            )
+        )
 
     # Get total count and anomaly count before pagination
     total = base_query.count()
@@ -317,10 +334,10 @@ async def get_transaction(
     )
 
 
-@router.patch("/{transaction_id}/category", response_model=TransactionResponse)
+@router.patch("/{transaction_id}/category", response_model=CategoryUpdateWithRuleResponse)
 async def update_transaction_category(
     transaction_id: str,
-    update: TransactionCategoryUpdate,
+    update: CategoryUpdateWithRuleRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     cache: CacheService = Depends(get_cache)
@@ -328,9 +345,14 @@ async def update_transaction_category(
     """
     Update the category for a specific transaction.
 
-    This is a user override - sets categorization_source to 'user'.
+    If apply_to_all=True:
+    1. Creates/updates a MerchantCategoryRule
+    2. Applies the category to all existing transactions with same merchant_name
+    3. Future transactions will auto-match via sync process
     """
-    tx = db.query(Transaction).join(Account).join(Institution).filter(
+    tx = db.query(Transaction).join(Account).join(Institution).options(
+        selectinload(Transaction.tags)
+    ).filter(
         and_(
             Transaction.id == transaction_id,
             Institution.user_id == current_user.id
@@ -340,11 +362,60 @@ async def update_transaction_category(
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Update category with user override
+    # Update this transaction
     tx.enriched_category = update.category
     tx.categorization_source = "user"
     tx.categorization_confidence = 1.0
     tx.enriched_at = datetime.utcnow()
+
+    rule_created = False
+    rule_id = None
+    transactions_updated = 0
+
+    if update.apply_to_all and tx.merchant_name:
+        # Create or update rule
+        existing_rule = db.query(MerchantCategoryRule).filter(
+            and_(
+                MerchantCategoryRule.user_id == current_user.id,
+                MerchantCategoryRule.merchant_name == tx.merchant_name
+            )
+        ).first()
+
+        if existing_rule:
+            existing_rule.category = update.category
+            existing_rule.updated_at = datetime.utcnow()
+            existing_rule.is_active = True
+            rule_id = existing_rule.id
+        else:
+            new_rule = MerchantCategoryRule(
+                user_id=current_user.id,
+                merchant_name=tx.merchant_name,
+                category=update.category
+            )
+            db.add(new_rule)
+            db.flush()
+            rule_id = new_rule.id
+            rule_created = True
+
+        # Apply to all existing transactions with same merchant
+        transactions_updated = db.query(Transaction).join(Account).join(Institution).filter(
+            and_(
+                Institution.user_id == current_user.id,
+                Transaction.merchant_name == tx.merchant_name,
+                Transaction.id != transaction_id
+            )
+        ).update({
+            Transaction.enriched_category: update.category,
+            Transaction.categorization_source: "user_rule",
+            Transaction.categorization_confidence: 1.0,
+            Transaction.enriched_at: datetime.utcnow()
+        }, synchronize_session=False)
+
+        # Update rule's times_applied counter
+        if rule_id:
+            rule = db.query(MerchantCategoryRule).filter(MerchantCategoryRule.id == rule_id).first()
+            if rule:
+                rule.times_applied = (rule.times_applied or 0) + transactions_updated + 1
 
     db.commit()
     db.refresh(tx)
@@ -352,16 +423,27 @@ async def update_transaction_category(
     # Invalidate dashboard cache for this user
     await cache.invalidate_user_dashboard(current_user.id)
 
-    return TransactionResponse(
-        id=tx.id,
-        account_id=tx.account_id,
-        date=tx.date,
-        amount=tx.amount,
-        description=tx.description,
-        merchant_name=tx.enriched_merchant or tx.merchant_name,
-        category=tx.enriched_category or tx.teller_category,
-        type=tx.type,
-        status=tx.status
+    return CategoryUpdateWithRuleResponse(
+        transaction=TransactionDetailResponse(
+            id=tx.id,
+            account_id=tx.account_id,
+            date=tx.date,
+            amount=tx.amount,
+            description=tx.description,
+            merchant_name=tx.enriched_merchant or tx.merchant_name,
+            category=tx.enriched_category or tx.teller_category,
+            type=tx.type,
+            status=tx.status,
+            is_anomaly=tx.is_anomaly or False,
+            anomaly_score=tx.anomaly_score,
+            anomaly_reason=tx.anomaly_reason,
+            is_one_time=tx.is_one_time or False,
+            user_reviewed=tx.user_reviewed or False,
+            tags=[TagResponse(id=tag.id, name=tag.name, color=tag.color, tag_type=tag.tag_type) for tag in tx.tags]
+        ),
+        rule_created=rule_created,
+        rule_id=rule_id,
+        transactions_updated=transactions_updated
     )
 
 
@@ -374,7 +456,9 @@ async def get_transaction_detail(
     """
     Get full transaction details including tags and anomaly info.
     """
-    tx = db.query(Transaction).join(Account).join(Institution).filter(
+    tx = db.query(Transaction).join(Account).join(Institution).options(
+        selectinload(Transaction.tags)  # Eager load tags
+    ).filter(
         and_(
             Transaction.id == transaction_id,
             Institution.user_id == current_user.id
@@ -421,7 +505,9 @@ async def update_transaction(
     """
     Update a transaction's merchant name, category, and/or tags.
     """
-    tx = db.query(Transaction).join(Account).join(Institution).filter(
+    tx = db.query(Transaction).join(Account).join(Institution).options(
+        selectinload(Transaction.tags)  # Eager load tags
+    ).filter(
         and_(
             Transaction.id == transaction_id,
             Institution.user_id == current_user.id
@@ -572,3 +658,82 @@ async def remove_tag_from_transaction(
         return {"message": "Tag removed successfully"}
 
     return {"message": "Tag was not on transaction"}
+
+
+# ==================== Merchant Category Rules ====================
+
+@router.get("/rules/check-merchant/{merchant_name}", response_model=MerchantCheckResponse)
+async def check_merchant_rule(
+    merchant_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check if a rule exists for a merchant and how many transactions would be affected.
+    """
+    existing_rule = db.query(MerchantCategoryRule).filter(
+        and_(
+            MerchantCategoryRule.user_id == current_user.id,
+            MerchantCategoryRule.merchant_name == merchant_name
+        )
+    ).first()
+
+    matching_count = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Institution.user_id == current_user.id,
+            Transaction.merchant_name == merchant_name
+        )
+    ).count()
+
+    return MerchantCheckResponse(
+        merchant_name=merchant_name,
+        has_existing_rule=existing_rule is not None,
+        existing_category=existing_rule.category if existing_rule else None,
+        matching_transactions=matching_count
+    )
+
+
+@router.get("/rules/merchant-categories", response_model=MerchantCategoryRulesListResponse)
+async def get_merchant_category_rules(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all merchant category rules for the current user."""
+    rules = db.query(MerchantCategoryRule).filter(
+        MerchantCategoryRule.user_id == current_user.id
+    ).order_by(MerchantCategoryRule.merchant_name).all()
+
+    return MerchantCategoryRulesListResponse(
+        rules=[MerchantCategoryRuleResponse(
+            id=rule.id,
+            merchant_name=rule.merchant_name,
+            category=rule.category,
+            is_active=rule.is_active,
+            times_applied=rule.times_applied or 0,
+            created_at=rule.created_at,
+            updated_at=rule.updated_at
+        ) for rule in rules],
+        total=len(rules)
+    )
+
+
+@router.delete("/rules/merchant-categories/{rule_id}")
+async def delete_merchant_category_rule(
+    rule_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a merchant category rule."""
+    rule = db.query(MerchantCategoryRule).filter(
+        and_(
+            MerchantCategoryRule.id == rule_id,
+            MerchantCategoryRule.user_id == current_user.id
+        )
+    ).first()
+
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    db.delete(rule)
+    db.commit()
+    return {"message": "Rule deleted"}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   LineChart,
   Line,
@@ -18,12 +19,18 @@ import { getSpendingTrend } from '@/lib/api';
 
 type ViewType = 'daily' | 'monthly' | 'yearly';
 
+interface CategorySpend {
+  category: string;
+  amount: number;
+}
+
 interface TrendDataPoint {
   day: number;
   date: string;
   daily: number;
   cumulative: number;
   budget_pace: number;
+  top_categories?: CategorySpend[];
 }
 
 interface LastMonthDataPoint {
@@ -50,6 +57,8 @@ interface MultiViewDataPoint {
   amount: number;
   is_current: boolean;
   projected?: number;
+  month?: number;
+  year?: number;
 }
 
 interface MultiViewTrendData {
@@ -72,6 +81,7 @@ interface SpendingTrendProps {
 }
 
 export function SpendingTrendChart({ trend: initialTrend, userBudget }: SpendingTrendProps) {
+  const router = useRouter();
   const [view, setView] = useState<ViewType>('daily');
   const [trendData, setTrendData] = useState<DailyTrendData | MultiViewTrendData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -133,15 +143,51 @@ export function SpendingTrendChart({ trend: initialTrend, userBudget }: Spending
       : 0;
     const isOnTrack = projectedTotal <= effectiveBudget;
 
-    // Merge this month and last month data for the chart
-    const chartData = trend.this_month.map((point) => {
-      const lastMonthPoint = trend.last_month.find((lm) => lm.day === point.day);
-      return {
-        ...point,
-        budget_pace: (effectiveBudget / trend.days_in_month) * point.day,
-        last_month: lastMonthPoint?.cumulative || null,
-      };
-    });
+    // Build chart data for full month (including future projection)
+    const dailyRate = trend.days_elapsed > 0 ? trend.current_total / trend.days_elapsed : 0;
+    const chartData: Array<{
+      day: number;
+      date: string;
+      daily: number;
+      cumulative: number | null;
+      projected: number | null;
+      budget_pace: number;
+      top_categories: CategorySpend[];
+      isToday: boolean;
+    }> = [];
+
+    for (let day = 1; day <= trend.days_in_month; day++) {
+      const actualPoint = trend.this_month.find((p) => p.day === day);
+      const isToday = day === trend.days_elapsed;
+      const isFuture = day > trend.days_elapsed;
+
+      if (isFuture) {
+        // Future days: show projection only
+        const projectedCumulative = trend.current_total + dailyRate * (day - trend.days_elapsed);
+        chartData.push({
+          day,
+          date: `${trend.month_name} ${day}`,
+          daily: 0,
+          cumulative: null,
+          projected: projectedCumulative,
+          budget_pace: (effectiveBudget / trend.days_in_month) * day,
+          top_categories: [],
+          isToday: false,
+        });
+      } else {
+        // Past/current days: show actual data
+        chartData.push({
+          day,
+          date: actualPoint?.date || `${trend.month_name} ${day}`,
+          daily: actualPoint?.daily || 0,
+          cumulative: actualPoint?.cumulative || 0,
+          projected: isToday ? (actualPoint?.cumulative ?? 0) : null, // Connect at today
+          budget_pace: (effectiveBudget / trend.days_in_month) * day,
+          top_categories: actualPoint?.top_categories || [],
+          isToday,
+        });
+      }
+    }
 
     // Calculate pace status
     const paceDiff = trend.current_total - (effectiveBudget / trend.days_in_month * trend.days_elapsed);
@@ -207,32 +253,100 @@ export function SpendingTrendChart({ trend: initialTrend, userBudget }: Spending
                 width={50}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid #E2E8F0',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 6px -1px rgba(15, 23, 42, 0.1)',
+                content={({ active, payload, label }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  const dataPoint = chartData.find((d) => d.day === label);
+                  const topCategories = dataPoint?.top_categories || [];
+                  const dailySpend = dataPoint?.daily || 0;
+                  const isFuture = label > trend.days_elapsed;
+                  const isToday = label === trend.days_elapsed;
+                  const projectedAmount = dataPoint?.projected || 0;
+
+                  // Format date label
+                  let dateLabel: string;
+                  if (dataPoint?.date && dataPoint.date.includes('-')) {
+                    dateLabel = new Date(dataPoint.date + 'T00:00:00').toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                    });
+                  } else {
+                    dateLabel = `${trend.month_name} ${label}`;
+                  }
+
+                  return (
+                    <div
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E2E8F0',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 6px -1px rgba(15, 23, 42, 0.1)',
+                        padding: '12px',
+                        minWidth: '140px',
+                      }}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-xs font-semibold text-slate-600">{dateLabel}</p>
+                        {isToday && (
+                          <span className="text-[10px] font-medium text-sky-600 bg-sky-50 px-1.5 py-0.5 rounded">
+                            Today
+                          </span>
+                        )}
+                      </div>
+                      {isFuture ? (
+                        <div className="space-y-1">
+                          <p className="text-xs text-slate-500">Projected cumulative</p>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {formatCurrency(projectedAmount)}
+                          </p>
+                        </div>
+                      ) : dailySpend > 0 ? (
+                        <div className="space-y-1.5">
+                          {topCategories.map((cat, idx) => (
+                            <div key={idx} className="flex justify-between items-center gap-3">
+                              <span className="text-xs text-slate-600 capitalize truncate max-w-[90px]">
+                                {cat.category}
+                              </span>
+                              <span className="text-xs font-medium text-slate-900">
+                                {formatCurrency(cat.amount)}
+                              </span>
+                            </div>
+                          ))}
+                          {topCategories.length > 0 && (
+                            <div className="border-t border-slate-200 pt-1.5 mt-1.5">
+                              <div className="flex justify-between items-center gap-3">
+                                <span className="text-xs font-medium text-slate-600">Total</span>
+                                <span className="text-xs font-semibold text-slate-900">
+                                  {formatCurrency(dailySpend)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                          {topCategories.length === 0 && (
+                            <p className="text-xs text-slate-500">{formatCurrency(dailySpend)}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400">No spending</p>
+                      )}
+                    </div>
+                  );
                 }}
-                formatter={(value: number, name: string) => [
-                  formatCurrency(value),
-                  name === 'cumulative' ? 'Actual' : name === 'budget_pace' ? 'Budget Pace' : 'Last Month',
-                ]}
-                labelFormatter={(day) => `Day ${day}`}
               />
               <Legend
                 verticalAlign="top"
                 height={36}
                 formatter={(value) => {
                   const labels: Record<string, string> = {
-                    cumulative: 'Actual Spending',
-                    budget_pace: 'Budget Pace',
-                    last_month: trend.last_month_name,
+                    cumulative: 'Actual',
+                    projected: 'Projected',
+                    budget_pace: 'Budget',
                   };
                   return <span className="text-sm text-slate-600">{labels[value] || value}</span>;
                 }}
               />
 
-              {/* Budget pace line (dashed) */}
+              {/* Budget line (dashed gray) */}
               <Line
                 type="monotone"
                 dataKey="budget_pace"
@@ -243,19 +357,7 @@ export function SpendingTrendChart({ trend: initialTrend, userBudget }: Spending
                 activeDot={false}
               />
 
-              {/* Last month comparison (light) */}
-              {trend.last_month.length > 0 && (
-                <Line
-                  type="monotone"
-                  dataKey="last_month"
-                  stroke="#CBD5E1"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={false}
-                />
-              )}
-
-              {/* This month actual (primary) */}
+              {/* Actual spending (solid blue) */}
               <Line
                 type="monotone"
                 dataKey="cumulative"
@@ -265,17 +367,24 @@ export function SpendingTrendChart({ trend: initialTrend, userBudget }: Spending
                 activeDot={{ r: 6, strokeWidth: 2 }}
               />
 
-              {/* Budget reference line */}
+              {/* Projected spending (dashed, from today onwards) */}
+              <Line
+                type="monotone"
+                dataKey="projected"
+                stroke="#0284C7"
+                strokeWidth={2}
+                strokeDasharray="6 4"
+                dot={false}
+                activeDot={false}
+                connectNulls={false}
+              />
+
+              {/* Today marker */}
               <ReferenceLine
-                y={effectiveBudget}
-                stroke="#7C3AED"
+                x={trend.days_elapsed}
+                stroke="#0284C7"
+                strokeWidth={2}
                 strokeDasharray="3 3"
-                label={{
-                  value: 'Budget',
-                  position: 'right',
-                  fill: '#7C3AED',
-                  fontSize: 12,
-                }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -309,6 +418,13 @@ export function SpendingTrendChart({ trend: initialTrend, userBudget }: Spending
         )}
       </>
     );
+  };
+
+  // Handle bar click to navigate to filtered transactions
+  const handleBarClick = (dataPoint: MultiViewDataPoint) => {
+    if (view === 'monthly' && dataPoint.month && dataPoint.year) {
+      router.push(`/transactions?month=${dataPoint.month}&year=${dataPoint.year}`);
+    }
   };
 
   // Render monthly or yearly view
@@ -411,6 +527,8 @@ export function SpendingTrendChart({ trend: initialTrend, userBudget }: Spending
                 fill="#0284C7"
                 radius={[4, 4, 0, 0]}
                 maxBarSize={50}
+                onClick={(data) => handleBarClick(data)}
+                style={{ cursor: view === 'monthly' ? 'pointer' : 'default' }}
               />
 
               {/* Average reference line */}

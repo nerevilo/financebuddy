@@ -169,6 +169,41 @@ async def get_top_merchants(
     return result
 
 
+@router.get("/recurring-payments")
+async def get_recurring_payments(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    cache: CacheService = Depends(get_cache)
+) -> Dict:
+    """
+    Get detected recurring payments (subscriptions)
+
+    Query params:
+    - limit: Max number of recurring payments to return (default 20)
+
+    Returns:
+    - recurring_payments: List of detected recurring payments
+    - total_monthly: Estimated total monthly recurring expenses
+    - count: Total number of recurring payments detected
+    """
+    cache_key = DashboardCacheKeys.recurring_payments(current_user.id, limit)
+
+    # Try to get from cache
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Generate fresh data
+    service = DashboardService(db, current_user.id)
+    result = service.get_recurring_payments(limit)
+
+    # Cache for 5 minutes
+    await cache.set(cache_key, result, CacheTTL.DEFAULT)
+
+    return result
+
+
 @router.get("/recent-transactions")
 async def get_recent_transactions(
     limit: int = 10,
@@ -284,7 +319,8 @@ async def get_dashboard_stats(
     if cached is not None:
         return cached
 
-    # Generate fresh data
+    # Generate fresh data (sequential - SQLAlchemy sessions aren't thread-safe)
+    # Cache handles most requests, so sequential generation on cache miss is acceptable
     service = DashboardService(db, current_user.id)
 
     result = {
@@ -294,7 +330,8 @@ async def get_dashboard_stats(
         'categories': service.get_category_breakdown(),
         'top_merchants': service.get_top_merchants(5),
         'recent_transactions': service.get_recent_transactions(5),
-        'spending_trend': service.get_spending_trend()
+        'spending_trend': service.get_spending_trend(),
+        'recurring_payments': service.get_recurring_payments(10)
     }
 
     # Cache for 5 minutes

@@ -40,6 +40,11 @@ export async function fetchAPI<T>(endpoint: string, options?: RequestInit): Prom
     throw new Error(errorData.detail || `API error: ${response.status}`);
   }
 
+  // Handle 204 No Content responses (e.g., DELETE operations)
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json();
 }
 
@@ -152,6 +157,27 @@ export const getSpendingTrend = (view: 'daily' | 'monthly' | 'yearly' = 'daily',
   if (budget) params.set('budget', budget.toString());
   return fetchAPI<any>(`/api/dashboard/spending-trend?${params.toString()}`);
 };
+
+// Recurring Payments types
+export interface RecurringPayment {
+  merchant: string;
+  amount: number;
+  frequency: 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+  category: string | null;
+  last_date: string | null;
+  next_expected: string | null;
+  occurrences: number;
+  emoji: string;
+}
+
+export interface RecurringPaymentsResponse {
+  recurring_payments: RecurringPayment[];
+  total_monthly: number;
+  count: number;
+}
+
+export const getRecurringPayments = (limit = 20) =>
+  fetchAPI<RecurringPaymentsResponse>(`/api/dashboard/recurring-payments?limit=${limit}`);
 
 // Category management
 export interface Category {
@@ -639,3 +665,104 @@ export const sendChatMessage = (conversationId: string, message: string) =>
     method: 'POST',
     body: JSON.stringify({ message }),
   });
+
+// ==================== API Key types ====================
+
+export interface APIKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  tier: string;
+  is_active: boolean;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface APIKeyCreated extends APIKey {
+  key: string; // The full API key - only shown once!
+}
+
+export interface APIKeyListResponse {
+  keys: APIKey[];
+  total: number;
+}
+
+export interface APIKeyCreate {
+  name: string;
+  scopes?: string[];
+  expires_in_days?: number;
+}
+
+export interface APIKeyUpdate {
+  name?: string;
+  scopes?: string[];
+  is_active?: boolean;
+}
+
+// ==================== API Key endpoints ====================
+
+export const getAPIKeys = () =>
+  fetchAPI<APIKeyListResponse>('/api/keys/');
+
+export const createAPIKey = (data: APIKeyCreate) =>
+  fetchAPI<APIKeyCreated>('/api/keys/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const getAPIKey = (keyId: string) =>
+  fetchAPI<APIKey>(`/api/keys/${keyId}`);
+
+export const updateAPIKey = (keyId: string, update: APIKeyUpdate) =>
+  fetchAPI<APIKey>(`/api/keys/${keyId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(update),
+  });
+
+export const revokeAPIKey = (keyId: string) =>
+  fetchAPI<void>(`/api/keys/${keyId}`, {
+    method: 'DELETE',
+  });
+
+// ==================== Password Reset ====================
+
+export interface PasswordResetResponse {
+  message: string;
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+export const requestPasswordReset = async (email: string): Promise<PasswordResetResponse> => {
+  const response = await fetch(`${API_BASE}/api/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Request failed');
+  }
+
+  return response.json();
+};
+
+export const confirmPasswordReset = async (
+  token: string,
+  newPassword: string
+): Promise<PasswordResetResponse> => {
+  const response = await fetch(`${API_BASE}/api/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || 'Reset failed');
+  }
+
+  return response.json();
+};

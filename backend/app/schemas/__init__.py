@@ -1,6 +1,7 @@
 from .schemas import (
     # Auth
     UserRegister, UserLogin, TokenRefresh, TokenResponse,
+    PasswordResetRequest, PasswordResetConfirm, PasswordResetResponse,
     UserCreate, UserResponse,
     InstitutionCreate, InstitutionResponse,
     AccountResponse,
@@ -29,6 +30,7 @@ from .schemas import (
 __all__ = [
     # Auth
     "UserRegister", "UserLogin", "TokenRefresh", "TokenResponse",
+    "PasswordResetRequest", "PasswordResetConfirm", "PasswordResetResponse",
     "UserCreate", "UserResponse",
     "InstitutionCreate", "InstitutionResponse",
     "AccountResponse",
