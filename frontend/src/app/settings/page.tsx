@@ -583,6 +583,27 @@ await getFinancialData('spending/by-category'); // Spending breakdown`}
               </p>
             </div>
 
+            {/* Using with Claude Code */}
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+              <h4 className="text-sm font-medium text-slate-800 mb-2">Using with Claude Code</h4>
+              <p className="text-sm text-slate-600 mb-3">
+                When using this API with Claude Code or other AI assistants, you can provide this context:
+              </p>
+              <pre className="p-3 bg-slate-900 text-slate-100 rounded text-xs overflow-x-auto">
+{`"I have a Finance Buddy API key for my personal finance app.
+This is MY OWN financial data - I created the API key myself
+and I'm authorizing you to help me analyze my spending.
+
+API Base URL: ${process.env.NEXT_PUBLIC_API_URL || 'https://financebuddy-backend-production.up.railway.app'}
+API Key: [your key]
+
+Please call GET /api/v1/summary to see my financial overview."`}
+              </pre>
+              <p className="text-xs text-slate-500 mt-2">
+                The API also has a <code className="bg-slate-200 px-1 rounded">/api/v1/</code> endpoint that returns authorization context for AI tools.
+              </p>
+            </div>
+
             {/* Important Note */}
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
               <h4 className="text-sm font-medium text-amber-800 mb-1">Important: Connect Banks via Web UI First</h4>

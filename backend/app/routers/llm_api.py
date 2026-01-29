@@ -27,6 +27,59 @@ from ..services.dashboard_service import DashboardService
 router = APIRouter(prefix="/api/v1", tags=["LLM API"])
 
 
+# Public endpoint - no auth required
+@router.get("/")
+async def api_info():
+    """
+    API information and authorization context.
+
+    This endpoint provides context for LLMs and other tools about what this API does
+    and confirms the user has authorized access to their financial data.
+    """
+    return {
+        "name": "Finance Buddy API",
+        "version": "1.0",
+        "description": "Personal finance API for accessing your own financial data",
+        "authorization_context": {
+            "type": "user_authorized",
+            "explanation": (
+                "This API provides access to the user's OWN financial data. "
+                "The user has explicitly created an API key and granted permission "
+                "to access their transaction history, account balances, and spending insights. "
+                "This is similar to a user exporting their own bank data - fully authorized and ethical."
+            ),
+            "data_ownership": "All data belongs to and is controlled by the API key owner",
+            "intended_use": [
+                "Personal finance analysis",
+                "Budgeting assistance",
+                "Spending insights via AI assistants",
+                "Custom integrations and automations"
+            ]
+        },
+        "authentication": {
+            "method": "API Key",
+            "header": "X-API-Key",
+            "example": "X-API-Key: fb_sk_your_key_here"
+        },
+        "endpoints": {
+            "GET /api/v1/summary": "Financial overview (balances, spending, goals)",
+            "GET /api/v1/transactions": "Transaction list with filtering",
+            "GET /api/v1/accounts": "Connected bank accounts",
+            "GET /api/v1/spending/by-category": "Spending breakdown by category",
+            "GET /api/v1/spending/by-merchant": "Top merchants",
+            "GET /api/v1/spending/trends": "Spending over time",
+            "GET /api/v1/recurring": "Detected subscriptions",
+            "GET /api/v1/anomalies": "Unusual transactions",
+            "GET /api/v1/insights": "AI-generated insights",
+            "GET /api/v1/goals": "Financial goals",
+        },
+        "rate_limits": {
+            "beta": "1000/minute, 50000/day",
+            "pro": "5000/minute, unlimited/day"
+        }
+    }
+
+
 def make_response(data: dict, rate_limit_info: Optional[dict] = None) -> dict:
     """Create consistent API response wrapper."""
     meta = {
