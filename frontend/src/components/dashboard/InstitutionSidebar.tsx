@@ -30,7 +30,16 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
   const [tellerReady, setTellerReady] = useState(false);
   const [addingBank, setAddingBank] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'syncing'; message: string } | null>(null);
   const pathname = usePathname();
+
+  // Auto-dismiss notifications
+  useEffect(() => {
+    if (notification && notification.type !== 'syncing') {
+      const timer = setTimeout(() => setNotification(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   // Expand all institutions by default when loaded
   useEffect(() => {
@@ -76,13 +85,17 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
   };
 
   const handleSync = async (institutionId: string) => {
+    const institution = institutions.find(i => i.id === institutionId);
     setSyncingIds(prev => new Set(prev).add(institutionId));
+    setNotification({ type: 'syncing', message: `Syncing ${institution?.name || 'account'}...` });
     try {
       await syncInstitution(institutionId);
       await refreshAllData();
       onDataChange?.();
+      setNotification({ type: 'success', message: `${institution?.name || 'Account'} synced successfully!` });
     } catch (error) {
       console.error('Sync failed:', error);
+      setNotification({ type: 'error', message: `Failed to sync ${institution?.name || 'account'}. Please try again.` });
     } finally {
       setSyncingIds(prev => {
         const next = new Set(prev);
@@ -113,6 +126,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
       environment: process.env.NEXT_PUBLIC_TELLER_ENV || 'sandbox',
       products: ['balance', 'transactions', 'identity'],
       onSuccess: async (enrollment: any) => {
+        setNotification({ type: 'syncing', message: 'Connecting bank and syncing transactions...' });
         try {
           await saveTellerConnection({
             accessToken: enrollment.accessToken,
@@ -122,14 +136,19 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
           // Refresh all cached data after connecting
           await refreshAllData();
           onDataChange?.();
+          setNotification({ type: 'success', message: 'Bank connected! Your transactions are now available.' });
         } catch (error) {
           console.error('Error saving connection:', error);
+          setNotification({ type: 'error', message: 'Failed to connect bank. Please try again.' });
         } finally {
           setAddingBank(false);
         }
       },
       onExit: () => setAddingBank(false),
-      onFailure: () => setAddingBank(false),
+      onFailure: () => {
+        setAddingBank(false);
+        setNotification({ type: 'error', message: 'Bank connection was cancelled or failed.' });
+      },
     });
     tellerConnect.open();
   };
@@ -190,6 +209,40 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
       <div className="p-4 border-b border-slate-700">
         <h2 className="font-semibold text-white tracking-tight">Finance Buddy</h2>
       </div>
+
+      {/* Notification Banner */}
+      {notification && (
+        <div className={`px-4 py-3 flex items-center gap-2 text-sm ${
+          notification.type === 'success' ? 'bg-emerald-500/20 text-emerald-300' :
+          notification.type === 'error' ? 'bg-rose-500/20 text-rose-300' :
+          'bg-blue-500/20 text-blue-300'
+        }`}>
+          {notification.type === 'syncing' && (
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          )}
+          {notification.type === 'success' && (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+          {notification.type === 'error' && (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
+          <span className="flex-1">{notification.message}</span>
+          {notification.type !== 'syncing' && (
+            <button onClick={() => setNotification(null)} className="hover:opacity-70">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="p-2 border-b border-slate-700">

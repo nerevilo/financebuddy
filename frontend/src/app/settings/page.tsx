@@ -475,43 +475,122 @@ function SettingsPageContent() {
           </div>
         </section>
 
-        {/* Example Usage Section */}
+        {/* API Documentation Section */}
         <section className="mt-8 bg-white rounded-2xl border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Example Usage</h2>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">API Documentation</h2>
 
-          <div className="space-y-4">
+          {/* Base URL */}
+          <div className="mb-6 p-4 bg-slate-50 rounded-lg">
+            <h4 className="text-sm font-medium text-slate-700 mb-2">Base URL</h4>
+            <code className="text-sm text-slate-800 bg-white px-3 py-1.5 rounded border border-slate-200">
+              {process.env.NEXT_PUBLIC_API_URL || 'https://financebuddy-backend-production.up.railway.app'}
+            </code>
+          </div>
+
+          <div className="space-y-6">
+            {/* Quick Start */}
             <div>
-              <h4 className="text-sm font-medium text-slate-700 mb-2">Using curl</h4>
+              <h4 className="text-sm font-medium text-slate-700 mb-2">Quick Start with curl</h4>
               <pre className="p-4 bg-slate-900 text-slate-100 rounded-lg text-sm overflow-x-auto">
-{`curl https://your-api.com/api/v1/summary \\
-  -H "X-API-Key: fb_sk_your_key_here"`}
+{`# Get your financial summary
+curl ${process.env.NEXT_PUBLIC_API_URL || 'https://financebuddy-backend-production.up.railway.app'}/api/v1/summary \\
+  -H "X-API-Key: YOUR_API_KEY"
+
+# Get recent transactions
+curl ${process.env.NEXT_PUBLIC_API_URL || 'https://financebuddy-backend-production.up.railway.app'}/api/v1/transactions?limit=20 \\
+  -H "X-API-Key: YOUR_API_KEY"`}
               </pre>
             </div>
 
+            {/* Using with Claude Code */}
             <div>
-              <h4 className="text-sm font-medium text-slate-700 mb-2">Using JavaScript</h4>
+              <h4 className="text-sm font-medium text-slate-700 mb-2">Using with Claude Code / LLMs</h4>
+              <p className="text-sm text-slate-600 mb-3">
+                You can use your API key to let AI assistants query your financial data. Just share the curl examples above
+                or use the JavaScript SDK pattern below.
+              </p>
               <pre className="p-4 bg-slate-900 text-slate-100 rounded-lg text-sm overflow-x-auto">
-{`const response = await fetch('https://your-api.com/api/v1/transactions', {
-  headers: {
-    'X-API-Key': 'fb_sk_your_key_here'
-  }
-});
-const data = await response.json();`}
+{`// JavaScript/TypeScript
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL || 'https://financebuddy-backend-production.up.railway.app'}';
+const API_KEY = 'YOUR_API_KEY';
+
+async function getFinancialData(endpoint) {
+  const response = await fetch(\`\${API_URL}/api/v1/\${endpoint}\`, {
+    headers: { 'X-API-Key': API_KEY }
+  });
+  return response.json();
+}
+
+// Examples:
+await getFinancialData('summary');           // Financial overview
+await getFinancialData('transactions');      // Recent transactions
+await getFinancialData('spending/by-category'); // Spending breakdown`}
               </pre>
             </div>
 
+            {/* Available Endpoints */}
             <div>
-              <h4 className="text-sm font-medium text-slate-700 mb-2">Available Endpoints</h4>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/summary</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/transactions</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/accounts</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/spending/by-category</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/spending/trends</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/anomalies</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/insights</code>
-                <code className="p-2 bg-slate-100 rounded">GET /api/v1/goals</code>
+              <h4 className="text-sm font-medium text-slate-700 mb-3">Available Endpoints</h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-2 pr-4 font-medium text-slate-700">Endpoint</th>
+                      <th className="text-left py-2 font-medium text-slate-700">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/summary</code></td><td className="py-2 text-slate-600">Financial overview (balances, spending, goals)</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/transactions</code></td><td className="py-2 text-slate-600">List transactions with filtering and pagination</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/transactions/:id</code></td><td className="py-2 text-slate-600">Get single transaction details</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">PATCH /api/v1/transactions/:id</code></td><td className="py-2 text-slate-600">Update transaction category or flags</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/accounts</code></td><td className="py-2 text-slate-600">List all connected accounts</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/spending/by-category</code></td><td className="py-2 text-slate-600">Spending breakdown by category</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/spending/by-merchant</code></td><td className="py-2 text-slate-600">Top merchants by spend amount</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/spending/trends</code></td><td className="py-2 text-slate-600">Spending over time (daily/monthly/yearly)</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/recurring</code></td><td className="py-2 text-slate-600">Detected subscriptions and recurring payments</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/anomalies</code></td><td className="py-2 text-slate-600">Unusual or flagged transactions</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/insights</code></td><td className="py-2 text-slate-600">AI-generated financial insights</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/goals</code></td><td className="py-2 text-slate-600">Financial goals and progress</td></tr>
+                    <tr><td className="py-2 pr-4"><code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded">GET /api/v1/income</code></td><td className="py-2 text-slate-600">Income sources and summary</td></tr>
+                  </tbody>
+                </table>
               </div>
+            </div>
+
+            {/* Query Parameters */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-700 mb-2">Transaction Filtering</h4>
+              <p className="text-sm text-slate-600 mb-2">The <code className="bg-slate-100 px-1 rounded">/api/v1/transactions</code> endpoint supports these query parameters:</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <code className="p-2 bg-slate-100 rounded">start_date=2024-01-01</code>
+                <code className="p-2 bg-slate-100 rounded">end_date=2024-12-31</code>
+                <code className="p-2 bg-slate-100 rounded">category=groceries</code>
+                <code className="p-2 bg-slate-100 rounded">merchant=costco</code>
+                <code className="p-2 bg-slate-100 rounded">min_amount=-100</code>
+                <code className="p-2 bg-slate-100 rounded">max_amount=0</code>
+                <code className="p-2 bg-slate-100 rounded">is_anomaly=true</code>
+                <code className="p-2 bg-slate-100 rounded">limit=50&amp;offset=0</code>
+              </div>
+            </div>
+
+            {/* Rate Limits */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-700 mb-2">Rate Limits</h4>
+              <p className="text-sm text-slate-600">
+                API keys have rate limits to prevent abuse. Current limits for beta tier: <strong>1,000 requests/minute</strong> and <strong>50,000 requests/day</strong>.
+                Rate limit info is included in each response&apos;s <code className="bg-slate-100 px-1 rounded">meta</code> field.
+              </p>
+            </div>
+
+            {/* Important Note */}
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <h4 className="text-sm font-medium text-amber-800 mb-1">Important: Connect Banks via Web UI First</h4>
+              <p className="text-sm text-amber-700">
+                API keys provide read access to your financial data. To connect bank accounts,
+                use the web dashboard (click &quot;Add Bank&quot; in the sidebar). Once connected,
+                your API key can access all your transaction data.
+              </p>
             </div>
           </div>
         </section>
