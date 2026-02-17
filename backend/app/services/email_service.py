@@ -82,7 +82,7 @@ class EmailService:
         """
         reset_url = f"{settings.frontend_url}/reset-password?token={reset_token}"
 
-        subject = "Reset Your Password - Finance Buddy"
+        subject = "Reset Your Password - Ledgi"
 
         html_content = f"""
 <!DOCTYPE html>
@@ -95,7 +95,7 @@ class EmailService:
     <div style="background-color: white; border-radius: 12px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
         <h1 style="color: #1e293b; font-size: 24px; margin-bottom: 16px;">Reset Your Password</h1>
         <p style="color: #475569; font-size: 16px; line-height: 1.6;">
-            You requested to reset your password for Finance Buddy.
+            You requested to reset your password for Ledgi.
         </p>
         <p style="color: #475569; font-size: 16px; line-height: 1.6;">
             Click the button below to set a new password. This link expires in 15 minutes.
@@ -120,7 +120,7 @@ class EmailService:
 
         text_content = f"""Reset Your Password
 
-You requested to reset your password for Finance Buddy.
+You requested to reset your password for Ledgi.
 
 Click this link to set a new password (expires in 15 minutes):
 {reset_url}

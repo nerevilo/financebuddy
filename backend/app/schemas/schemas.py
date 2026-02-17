@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import date, datetime
 
@@ -7,31 +7,31 @@ from datetime import date, datetime
 
 class UserRegister(BaseModel):
     """Request body for user registration."""
-    email: str
-    password: str
-    name: Optional[str] = None
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    name: Optional[str] = Field(None, max_length=100)
 
 
 class UserLogin(BaseModel):
     """Request body for user login."""
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
 
 
 class TokenRefresh(BaseModel):
     """Request body for token refresh."""
-    refresh_token: str
+    refresh_token: str = Field(max_length=2000)
 
 
 class PasswordResetRequest(BaseModel):
     """Request to initiate password reset."""
-    email: str
+    email: EmailStr
 
 
 class PasswordResetConfirm(BaseModel):
     """Request to complete password reset with new password."""
-    token: str
-    new_password: str
+    token: str = Field(max_length=500)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class PasswordResetResponse(BaseModel):
@@ -169,14 +169,14 @@ class CategoryResponse(BaseModel):
 
 
 class TransactionCategoryUpdate(BaseModel):
-    category: str
+    category: str = Field(max_length=100)
 
 
 # ==================== Merchant Category Rule Schemas ====================
 
 class CategoryUpdateWithRuleRequest(BaseModel):
     """Extended category update that can optionally create a rule."""
-    category: str
+    category: str = Field(max_length=100)
     apply_to_all: bool = False  # If True, create rule and apply to existing transactions
 
 
@@ -229,18 +229,18 @@ class TransactionListResponse(BaseModel):
 # ==================== User Profile Schemas ====================
 
 class UserProfileCreate(BaseModel):
-    household_size: Optional[int] = 1
-    location_city: Optional[str] = None
-    location_state: Optional[str] = None
-    context_notes: Optional[str] = None
+    household_size: Optional[int] = Field(1, ge=1, le=20)
+    location_city: Optional[str] = Field(None, max_length=100)
+    location_state: Optional[str] = Field(None, max_length=50)
+    context_notes: Optional[str] = Field(None, max_length=1000)
     insight_frequency: Optional[str] = "daily"
 
 
 class UserProfileUpdate(BaseModel):
-    household_size: Optional[int] = None
-    location_city: Optional[str] = None
-    location_state: Optional[str] = None
-    context_notes: Optional[str] = None
+    household_size: Optional[int] = Field(None, ge=1, le=20)
+    location_city: Optional[str] = Field(None, max_length=100)
+    location_state: Optional[str] = Field(None, max_length=50)
+    context_notes: Optional[str] = Field(None, max_length=1000)
     insight_frequency: Optional[str] = None
     preferred_categories: Optional[List[str]] = None
 
@@ -266,16 +266,16 @@ class UserProfileResponse(BaseModel):
 # ==================== Income Source Schemas ====================
 
 class IncomeSourceCreate(BaseModel):
-    name: str
-    amount: float
-    frequency: str  # weekly, biweekly, monthly, yearly, irregular
+    name: str = Field(max_length=100)
+    amount: float = Field(gt=0)
+    frequency: str = Field(pattern=r"^(weekly|biweekly|monthly|yearly|irregular)$")
     next_expected_date: Optional[date] = None
 
 
 class IncomeSourceUpdate(BaseModel):
-    name: Optional[str] = None
-    amount: Optional[float] = None
-    frequency: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=100)
+    amount: Optional[float] = Field(None, gt=0)
+    frequency: Optional[str] = Field(None, pattern=r"^(weekly|biweekly|monthly|yearly|irregular)$")
     next_expected_date: Optional[date] = None
     is_active: Optional[bool] = None
 
@@ -318,9 +318,9 @@ class DetectedIncome(BaseModel):
 # ==================== Goal Schemas ====================
 
 class GoalCreate(BaseModel):
-    name: str
+    name: str = Field(max_length=100)
     description: Optional[str] = None
-    target_amount: float
+    target_amount: float = Field(ge=0)
     current_amount: Optional[float] = 0.0
     monthly_allocation: Optional[float] = None
     deadline: Optional[date] = None
@@ -376,7 +376,7 @@ class GoalSuggestion(BaseModel):
 # ==================== Insight Schemas ====================
 
 class InsightFeedbackUpdate(BaseModel):
-    feedback: str  # helpful, acted_on, dismissed
+    feedback: str = Field(pattern=r"^(helpful|acted_on|dismissed)$")
 
 
 class InsightResponse(BaseModel):
@@ -440,7 +440,7 @@ class UnusualTransactionsResponse(BaseModel):
 
 class MarkOneTimeRequest(BaseModel):
     """Request to mark a transaction as one-time expense."""
-    reason: Optional[str] = None
+    reason: Optional[str] = Field(None, max_length=500)
     exclude_from_budget: bool = True
 
 
@@ -474,7 +474,7 @@ class AnomalySummary(BaseModel):
 
 class TagCreate(BaseModel):
     """Request body for creating a tag."""
-    name: str
+    name: str = Field(max_length=50)
     color: Optional[str] = None
 
 

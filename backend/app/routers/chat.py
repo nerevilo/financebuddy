@@ -3,13 +3,14 @@ Chat Router - Agentic Chatbot API
 
 Handles conversation management and message processing with Claude/Gemini.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional
 import json
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
+from ..core.rate_limiter import limiter
 from ..models import User
 from ..schemas.chat_schemas import (
     ConversationResponse,
@@ -165,9 +166,11 @@ async def delete_conversation(
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=ChatResponse)
+@limiter.limit("20/minute")
 async def send_message(
+    request: Request,
     conversation_id: str,
-    request: ChatRequest,
+    chat_request: ChatRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -190,7 +193,7 @@ async def send_message(
     - Comparing spending periods
     """
     chat_service = ChatService(db, current_user.id)
-    response = await chat_service.process_message(conversation_id, request.message)
+    response = await chat_service.process_message(conversation_id, chat_request.message)
 
     # Format tool_calls if present
     tool_results = None

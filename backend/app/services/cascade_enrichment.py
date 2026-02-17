@@ -29,12 +29,11 @@ Expected cost for 791 transactions:
 - Ntropy: 17 × $0.02 = $0.34
 TOTAL: $0.59 (vs $15.82 with Ntropy only = 96% savings!)
 """
-from typing import Optional, Dict
-from datetime import datetime
+from typing import Optional, Dict, List, Tuple
 from ..models.models import Transaction
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
-from .semantic_matcher import get_semantic_matcher, SemanticMatcher
+from .semantic_matcher import get_semantic_matcher
 from .gemini_enrichment import GeminiEnrichment
 from .ntropy_client import NtropyClient
 from .categories import normalize_category_id
@@ -265,6 +264,149 @@ class CascadeEnrichment:
         logger.warning("All enrichment methods failed", extra={"description": transaction.description})
         result["method_used"] = "failed"
         return result
+
+    async def enrich_batch(self, transactions: List[Transaction]) -> List[Dict]:
+        """
+        Batch enrichment - optimized for processing multiple transactions.
+
+        Strategy:
+        1. Apply semantic/rule matching to ALL transactions first (FREE, instant)
+        2. Separate into: already_done, high_confidence_rules, needs_llm
+        3. Batch LLM calls for transactions that need it
+        4. Return results in original order
+
+        This is significantly faster than calling enrich_transaction() in a loop
+        because it batches the LLM calls (5-10x fewer API calls).
+
+        Args:
+            transactions: List of transactions to enrich
+
+        Returns:
+            List of enrichment results (same order as input)
+        """
+        if not transactions:
+            return []
+
+        results: List[Dict] = []
+        needs_llm: List[Tuple[int, Transaction, Optional[Dict]]] = []  # (index, tx, hint)
+
+        # Step 1: Process all transactions through semantic/rule matching
+        for i, tx in enumerate(transactions):
+            result = {
+                "merchant": None,
+                "category": None,
+                "address": None,
+                "city": None,
+                "state": None,
+                "confidence": 0.0,
+                "source": None,
+                "cost": 0.0,
+                "searched": False,
+                "method_used": None
+            }
+
+            # Check if already enriched
+            if tx.enriched_merchant:
+                self.method_counts["cache"] += 1
+                result.update({
+                    "merchant": tx.enriched_merchant,
+                    "category": tx.enriched_category,
+                    "confidence": tx.categorization_confidence or 0.9,
+                    "source": tx.categorization_source or "cache",
+                    "cost": 0.0,
+                    "method_used": "cache"
+                })
+                results.append(result)
+                continue
+
+            # Try semantic/rule matching
+            semantic_result = self.semantic_matcher.match(tx.description)
+            semantic_hint = None
+
+            if semantic_result:
+                source_type = semantic_result.get("source", "semantic")
+                confidence = semantic_result.get("confidence", 0.0)
+
+                # HIGH CONFIDENCE: Use rule match directly
+                if source_type == "rule_match" and confidence >= self.HIGH_CONFIDENCE_THRESHOLD:
+                    self.method_counts["semantic_rule"] += 1
+                    result.update({
+                        "merchant": semantic_result.get("merchant"),
+                        "category": normalize_category_id(semantic_result.get("category", "other")),
+                        "confidence": confidence,
+                        "source": "semantic_rule",
+                        "cost": 0.0,
+                        "method_used": "semantic_rule",
+                        "matched_pattern": semantic_result.get("matched_pattern")
+                    })
+                    results.append(result)
+                    continue
+
+                # MEDIUM CONFIDENCE: Save as hint for LLM
+                elif confidence >= self.MEDIUM_CONFIDENCE_THRESHOLD:
+                    semantic_hint = {
+                        "suggested_merchant": semantic_result.get("merchant"),
+                        "suggested_category": semantic_result.get("category"),
+                        "confidence": confidence,
+                        "source": source_type
+                    }
+
+            # Needs LLM processing
+            results.append(result)  # Placeholder, will be updated
+            needs_llm.append((i, tx, semantic_hint))
+
+        # Step 2: Batch process transactions that need LLM
+        if needs_llm:
+            logger.info("Batch enrichment: sending to LLM", extra={
+                "total": len(transactions),
+                "needs_llm": len(needs_llm),
+                "from_rules": len(transactions) - len(needs_llm)
+            })
+
+            # Extract just the transactions for batch processing
+            llm_transactions = [tx for _, tx, _ in needs_llm]
+            llm_results = await self.gemini.enrich_batch(llm_transactions)
+
+            # Update results with LLM responses
+            for (idx, tx, hint), llm_result in zip(needs_llm, llm_results):
+                if llm_result and llm_result.get("confidence", 0) >= self.LLM_BASIC_THRESHOLD:
+                    was_cached = llm_result.get("cached", False)
+                    if was_cached:
+                        self.method_counts["llm_cached"] += 1
+                        cost = 0.0
+                    else:
+                        self.method_counts["llm_basic"] += 1
+                        cost = llm_result.get("cost", 0.000075)
+                        self.total_cost += cost
+
+                    results[idx].update({
+                        "merchant": llm_result.get("merchant"),
+                        "category": llm_result.get("category", "other"),
+                        "city": llm_result.get("city"),
+                        "state": llm_result.get("state"),
+                        "confidence": llm_result.get("confidence"),
+                        "source": llm_result.get("source", "gemini_flash_batch"),
+                        "cost": cost,
+                        "method_used": "llm_batch",
+                        "had_hint": hint is not None,
+                        "cached": was_cached
+                    })
+                else:
+                    # LLM failed for this transaction, mark as failed
+                    results[idx]["method_used"] = "failed"
+                    logger.warning("Batch LLM failed for transaction", extra={
+                        "description": tx.description[:50]
+                    })
+
+        logger.info("Batch enrichment complete", extra={
+            "total": len(transactions),
+            "successful": sum(1 for r in results if r.get("method_used") != "failed"),
+            "from_rules": sum(1 for r in results if r.get("method_used") == "semantic_rule"),
+            "from_llm": sum(1 for r in results if r.get("method_used") == "llm_batch"),
+            "from_cache": sum(1 for r in results if r.get("method_used") == "cache")
+        })
+
+        return results
 
     def get_stats(self) -> Dict:
         """

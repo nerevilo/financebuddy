@@ -3,15 +3,16 @@ Categorization Router
 
 Endpoints for transaction enrichment, categorization, and ML-based merchant recognition.
 """
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Optional
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
 from ..core.logging_config import get_logger
+from ..core.rate_limiter import limiter
 from ..services.categorization import TransferDetector
 from ..services.ntropy_client import NtropyClient
 from ..services.cascade_enrichment import CascadeEnrichment
@@ -47,7 +48,7 @@ class NtropyStatus(BaseModel):
 
 
 # Background task for enrichment
-async def enrich_transactions_task(db: Session):
+async def enrich_transactions_task(db: Session, user_id: str):
     """Background task to enrich transactions using Ntropy"""
     transfer_detector = TransferDetector(db=db)
     ntropy_client = NtropyClient()
@@ -56,10 +57,11 @@ async def enrich_transactions_task(db: Session):
         logger.warning("Ntropy is not enabled. Skipping enrichment.")
         return
 
-    # Get all transactions without enrichment
-    transactions = db.query(Transaction).filter(
+    # Get user's transactions without enrichment
+    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+        Institution.user_id == user_id,
         Transaction.enriched_merchant == None
-    ).all()
+    ).limit(500).all()
 
     logger.info("Starting enrichment", extra={"transaction_count": len(transactions)})
 
@@ -74,7 +76,7 @@ async def enrich_transactions_task(db: Session):
             # Mark as transfer, no need to enrich
             tx.categorization_source = "rule"
             tx.categorization_confidence = 0.95
-            tx.enriched_at = datetime.utcnow()
+            tx.enriched_at = datetime.now(timezone.utc)
             transfer_count += 1
         else:
             # Step 2: Enrich with Ntropy
@@ -86,7 +88,7 @@ async def enrich_transactions_task(db: Session):
                     tx.enriched_category = enriched["category"]
                     tx.categorization_source = "ntropy"
                     tx.categorization_confidence = enriched["confidence"]
-                    tx.enriched_at = datetime.utcnow()
+                    tx.enriched_at = datetime.now(timezone.utc)
                     enriched_count += 1
 
             except Exception as e:
@@ -104,7 +106,9 @@ async def enrich_transactions_task(db: Session):
 
 
 @router.post("/enrich/all", response_model=EnrichmentStatus)
+@limiter.limit("5/minute")
 async def enrich_all_transactions(
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -125,7 +129,7 @@ async def enrich_all_transactions(
     enriched = user_txs.filter(Transaction.enriched_merchant != None).count()
 
     # Start background task
-    background_tasks.add_task(enrich_transactions_task, db)
+    background_tasks.add_task(enrich_transactions_task, db, current_user.id)
 
     return EnrichmentStatus(
         message="Enrichment started in background",
@@ -165,7 +169,7 @@ async def enrich_single_transaction(
     if transaction.is_transfer:
         transaction.categorization_source = "rule"
         transaction.categorization_confidence = 0.95
-        transaction.enriched_at = datetime.utcnow()
+        transaction.enriched_at = datetime.now(timezone.utc)
         db.commit()
 
         return {
@@ -183,7 +187,7 @@ async def enrich_single_transaction(
             transaction.enriched_category = enriched["category"]
             transaction.categorization_source = "ntropy"
             transaction.categorization_confidence = enriched["confidence"]
-            transaction.enriched_at = datetime.utcnow()
+            transaction.enriched_at = datetime.now(timezone.utc)
             db.commit()
 
             return {
@@ -200,7 +204,7 @@ async def enrich_single_transaction(
     else:
         raise HTTPException(
             status_code=503,
-            detail="Ntropy is not enabled. Check NTROPY_API_KEY and USE_NTROPY settings."
+            detail="Enrichment service is not available"
         )
 
 
@@ -336,15 +340,16 @@ class CascadeStats(BaseModel):
     savings_percent: float
 
 
-async def cascade_enrich_transactions_task(db: Session):
+async def cascade_enrich_transactions_task(db: Session, user_id: str):
     """Background task to enrich transactions using cascade strategy"""
     transfer_detector = TransferDetector(db=db)
     cascade = CascadeEnrichment()
 
-    # Get all transactions without enrichment
-    transactions = db.query(Transaction).filter(
+    # Get user's transactions without enrichment
+    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+        Institution.user_id == user_id,
         Transaction.enriched_merchant == None
-    ).all()
+    ).limit(500).all()
 
     logger.info("Starting cascade enrichment", extra={"transaction_count": len(transactions)})
 
@@ -359,7 +364,7 @@ async def cascade_enrich_transactions_task(db: Session):
             # Mark as transfer, no need to enrich
             tx.categorization_source = "rule"
             tx.categorization_confidence = 0.95
-            tx.enriched_at = datetime.utcnow()
+            tx.enriched_at = datetime.now(timezone.utc)
             transfer_count += 1
         else:
             # Step 2: Cascade enrichment
@@ -371,7 +376,7 @@ async def cascade_enrich_transactions_task(db: Session):
                     tx.enriched_category = result["category"]
                     tx.categorization_source = result["source"]
                     tx.categorization_confidence = result["confidence"]
-                    tx.enriched_at = datetime.utcnow()
+                    tx.enriched_at = datetime.now(timezone.utc)
                     enriched_count += 1
 
             except Exception as e:
@@ -402,7 +407,9 @@ async def cascade_enrich_transactions_task(db: Session):
 
 
 @router.post("/cascade/enrich/all", response_model=EnrichmentStatus)
+@limiter.limit("5/minute")
 async def cascade_enrich_all(
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -425,7 +432,7 @@ async def cascade_enrich_all(
     enriched = user_txs.filter(Transaction.enriched_merchant != None).count()
 
     # Start background task
-    background_tasks.add_task(cascade_enrich_transactions_task, db)
+    background_tasks.add_task(cascade_enrich_transactions_task, db, current_user.id)
 
     return EnrichmentStatus(
         message="Cascade enrichment started in background (Pattern → LLM → Search → Ntropy)",
@@ -469,7 +476,7 @@ async def cascade_enrich_single(
     if transaction.is_transfer:
         transaction.categorization_source = "rule"
         transaction.categorization_confidence = 0.95
-        transaction.enriched_at = datetime.utcnow()
+        transaction.enriched_at = datetime.now(timezone.utc)
         db.commit()
 
         return {
@@ -488,7 +495,7 @@ async def cascade_enrich_single(
         transaction.enriched_category = result["category"]
         transaction.categorization_source = result["source"]
         transaction.categorization_confidence = result["confidence"]
-        transaction.enriched_at = datetime.utcnow()
+        transaction.enriched_at = datetime.now(timezone.utc)
         db.commit()
 
         return {
@@ -653,7 +660,9 @@ async def get_enrichment_budget_status(
 
 
 @router.post("/budget/enrich", response_model=BudgetEnrichResult)
+@limiter.limit("5/minute")
 async def enrich_with_budget(
+    request: Request,
     max_transactions: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -675,3 +684,185 @@ async def enrich_with_budget(
         raise HTTPException(status_code=400, detail=result["error"])
 
     return result
+
+
+# ========================================
+# ENRICHMENT RETRY ENDPOINTS (SERVERLESS-FRIENDLY)
+# ========================================
+# For retrying failed enrichments without background workers
+# ========================================
+
+
+class RetryResult(BaseModel):
+    processed: int
+    succeeded: int
+    failed: int
+    remaining: int
+
+
+@router.post("/enrich/retry-failed", response_model=RetryResult)
+async def retry_failed_enrichments(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retry failed or unenriched transactions.
+
+    SERVERLESS-FRIENDLY: This endpoint processes enrichments synchronously
+    during the request, making it compatible with Railway serverless mode
+    that scales to zero.
+
+    Call this:
+    - When user visits dashboard (frontend can trigger)
+    - Periodically via cron job
+    - Manually when user wants to retry
+
+    Args:
+        limit: Max transactions to process per call (default: 50)
+
+    Returns:
+        Count of processed, succeeded, failed transactions
+    """
+    # Get unenriched transactions for this user (respects retry attempts)
+    failed_txns = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Institution.user_id == current_user.id,
+            Transaction.enriched_category.is_(None),
+            Transaction.is_transfer == False,
+            Transaction.enrichment_attempts < 3
+        )
+    ).order_by(Transaction.enrichment_queued_at.asc().nullsfirst()).limit(limit).all()
+
+    if not failed_txns:
+        # Count total remaining
+        remaining = db.query(Transaction).join(Account).join(Institution).filter(
+            and_(
+                Institution.user_id == current_user.id,
+                Transaction.enriched_category.is_(None),
+                Transaction.is_transfer == False
+            )
+        ).count()
+
+        return RetryResult(
+            processed=0,
+            succeeded=0,
+            failed=0,
+            remaining=remaining
+        )
+
+    logger.info("Retrying failed enrichments", extra={
+        "user_id": current_user.id,
+        "count": len(failed_txns)
+    })
+
+    # Mark as being processed
+    for tx in failed_txns:
+        tx.enrichment_attempts = (tx.enrichment_attempts or 0) + 1
+        tx.enrichment_queued_at = datetime.now(timezone.utc)
+
+    db.commit()
+
+    # Use batch enrichment for efficiency
+    cascade = CascadeEnrichment()
+    succeeded = 0
+    failed_count = 0
+
+    try:
+        results = await cascade.enrich_batch(failed_txns)
+
+        for tx, result in zip(failed_txns, results):
+            if result and result.get("merchant"):
+                tx.enriched_merchant = result["merchant"]
+                tx.enriched_category = result["category"]
+                tx.categorization_source = result.get("source", "retry_batch")
+                tx.categorization_confidence = result.get("confidence", 0.8)
+                tx.enriched_at = datetime.now(timezone.utc)
+                tx.enrichment_error = None
+                succeeded += 1
+            elif result and result.get("method_used") == "failed":
+                tx.enrichment_error = "All enrichment methods failed"
+                failed_count += 1
+            else:
+                tx.enrichment_error = "Unknown error"
+                failed_count += 1
+
+        db.commit()
+
+    except Exception as e:
+        logger.error("Retry batch failed", extra={"error": str(e)})
+        for tx in failed_txns:
+            tx.enrichment_error = str(e)
+        db.commit()
+        failed_count = len(failed_txns)
+
+    # Count remaining
+    remaining = db.query(Transaction).join(Account).join(Institution).filter(
+        and_(
+            Institution.user_id == current_user.id,
+            Transaction.enriched_category.is_(None),
+            Transaction.is_transfer == False
+        )
+    ).count()
+
+    return RetryResult(
+        processed=len(failed_txns),
+        succeeded=succeeded,
+        failed=failed_count,
+        remaining=remaining
+    )
+
+
+@router.get("/enrich/queue-status")
+async def get_enrichment_queue_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get status of enrichment queue for current user.
+
+    Shows:
+    - Unenriched transaction count
+    - Failed/retry count
+    - Max retry exceeded count
+    """
+    base_query = db.query(Transaction).join(Account).join(Institution).filter(
+        Institution.user_id == current_user.id
+    )
+
+    total = base_query.count()
+    enriched = base_query.filter(Transaction.enriched_category.isnot(None)).count()
+    transfers = base_query.filter(Transaction.is_transfer == True).count()
+
+    unenriched = base_query.filter(
+        and_(
+            Transaction.enriched_category.is_(None),
+            Transaction.is_transfer == False
+        )
+    ).count()
+
+    retry_pending = base_query.filter(
+        and_(
+            Transaction.enriched_category.is_(None),
+            Transaction.is_transfer == False,
+            Transaction.enrichment_attempts < 3
+        )
+    ).count()
+
+    max_retries_exceeded = base_query.filter(
+        and_(
+            Transaction.enriched_category.is_(None),
+            Transaction.is_transfer == False,
+            Transaction.enrichment_attempts >= 3
+        )
+    ).count()
+
+    return {
+        "total_transactions": total,
+        "enriched": enriched,
+        "transfers": transfers,
+        "unenriched": unenriched,
+        "retry_pending": retry_pending,
+        "max_retries_exceeded": max_retries_exceeded,
+        "enrichment_coverage": round((enriched + transfers) / total * 100, 1) if total > 0 else 0
+    }

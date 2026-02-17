@@ -13,6 +13,7 @@ Cost:
 """
 import httpx
 from typing import List, Dict, Optional
+
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
 
@@ -31,6 +32,18 @@ class SearchService:
     def __init__(self):
         settings = get_settings()
         self.tavily_key = settings.tavily_api_key
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the shared HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=10.0)
+        return self._client
+
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
 
     async def search(self, query: str, max_results: int = 3) -> List[Dict]:
         """
@@ -59,49 +72,47 @@ class SearchService:
         Best results for AI agents - returns clean, structured data
         """
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    "https://api.tavily.com/search",
-                    headers={
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "api_key": self.tavily_key,
-                        "query": query,
-                        "search_depth": "basic",  # or "advanced" for more thorough
-                        "max_results": max_results,
-                        "include_answer": True,  # Get AI-generated answer
-                        "include_raw_content": False  # Don't need full page content
-                    }
-                )
+            client = await self._get_client()
+            response = await client.post(
+                "https://api.tavily.com/search",
+                headers={
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "api_key": self.tavily_key,
+                    "query": query,
+                    "search_depth": "basic",
+                    "max_results": max_results,
+                    "include_answer": True,
+                    "include_raw_content": False
+                }
+            )
 
-                if response.status_code == 200:
-                    data = response.json()
+            if response.status_code == 200:
+                data = response.json()
 
-                    results = []
+                results = []
 
-                    # Add AI-generated answer if available
-                    if data.get("answer"):
-                        results.append({
-                            "title": "AI Summary",
-                            "snippet": data["answer"],
-                            "url": "",
-                            "source": "tavily_ai"
-                        })
+                if data.get("answer"):
+                    results.append({
+                        "title": "AI Summary",
+                        "snippet": data["answer"],
+                        "url": "",
+                        "source": "tavily_ai"
+                    })
 
-                    # Add search results
-                    for result in data.get("results", [])[:max_results]:
-                        results.append({
-                            "title": result.get("title", ""),
-                            "snippet": result.get("content", ""),
-                            "url": result.get("url", ""),
-                            "source": "tavily"
-                        })
+                for result in data.get("results", [])[:max_results]:
+                    results.append({
+                        "title": result.get("title", ""),
+                        "snippet": result.get("content", ""),
+                        "url": result.get("url", ""),
+                        "source": "tavily"
+                    })
 
-                    return results
-                else:
-                    logger.error("Tavily API error", extra={"status_code": response.status_code})
-                    return []
+                return results
+            else:
+                logger.error("Tavily API error", extra={"status_code": response.status_code})
+                return []
 
         except Exception as e:
             logger.error("Tavily search error", extra={"error": str(e)})
@@ -115,41 +126,39 @@ class SearchService:
         Returns structured data when available.
         """
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    "https://api.duckduckgo.com/",
-                    params={
-                        "q": query,
-                        "format": "json",
-                        "no_html": 1,
-                        "skip_disambig": 1
-                    }
-                )
+            client = await self._get_client()
+            response = await client.get(
+                "https://api.duckduckgo.com/",
+                params={
+                    "q": query,
+                    "format": "json",
+                    "no_html": 1,
+                    "skip_disambig": 1
+                }
+            )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    results = []
+            if response.status_code == 200:
+                data = response.json()
+                results = []
 
-                    # Get instant answer if available
-                    if data.get("AbstractText"):
+                if data.get("AbstractText"):
+                    results.append({
+                        "title": data.get("Heading", ""),
+                        "snippet": data.get("AbstractText", ""),
+                        "url": data.get("AbstractURL", ""),
+                        "source": "duckduckgo"
+                    })
+
+                for topic in data.get("RelatedTopics", [])[:max_results]:
+                    if isinstance(topic, dict) and "Text" in topic:
                         results.append({
-                            "title": data.get("Heading", ""),
-                            "snippet": data.get("AbstractText", ""),
-                            "url": data.get("AbstractURL", ""),
+                            "title": topic.get("FirstURL", "").split("/")[-1],
+                            "snippet": topic.get("Text", ""),
+                            "url": topic.get("FirstURL", ""),
                             "source": "duckduckgo"
                         })
 
-                    # Get related topics
-                    for topic in data.get("RelatedTopics", [])[:max_results]:
-                        if isinstance(topic, dict) and "Text" in topic:
-                            results.append({
-                                "title": topic.get("FirstURL", "").split("/")[-1],
-                                "snippet": topic.get("Text", ""),
-                                "url": topic.get("FirstURL", ""),
-                                "source": "duckduckgo"
-                            })
-
-                    return results[:max_results]
+                return results[:max_results]
 
         except Exception as e:
             logger.error("DuckDuckGo search error", extra={"error": str(e)})

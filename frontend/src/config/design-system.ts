@@ -1,7 +1,7 @@
 /**
  * Slate & Coral Design System Configuration
  *
- * A premium, professional design system for FinanceBuddy.
+ * A premium, professional design system for Ledgi.
  * Cool slate tones with coral accents - sophisticated yet approachable.
  */
 

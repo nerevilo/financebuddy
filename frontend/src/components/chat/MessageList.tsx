@@ -17,7 +17,7 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
           <Sparkles className="w-8 h-8 text-slate-400" />
         </div>
         <h3 className="font-semibold text-slate-800 mb-2">
-          Hi! I&apos;m your Finance Buddy
+          Hi! I&apos;m Ledgi
         </h3>
         <p className="text-sm text-slate-500 max-w-xs">
           Ask me about your spending, search transactions, check your budget pace, or manage your financial goals.

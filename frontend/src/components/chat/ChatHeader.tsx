@@ -31,7 +31,7 @@ export function ChatHeader({
         ) : null}
         <div>
           <h2 className="font-semibold text-slate-900">
-            {showingHistory ? 'Chat History' : 'Finance Buddy'}
+            {showingHistory ? 'Chat History' : 'Ledgi'}
           </h2>
           {!showingHistory && conversationTitle && (
             <p className="text-xs text-slate-500 truncate max-w-[180px]">

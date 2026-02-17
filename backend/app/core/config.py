@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from functools import lru_cache
 from enum import Enum
-import os
 
 
 class TellerEnvironment(str, Enum):
@@ -16,8 +15,11 @@ class TellerEnvironment(str, Enum):
 
 class Settings(BaseSettings):
     # App
-    app_name: str = "FinTrack API"
+    app_name: str = "Ledgi API"
     debug: bool = False
+
+    # Encryption — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    encryption_key: str = ""
 
     # Teller API
     teller_app_id: str = "app_pn55bmnf8k4papve7o000"
@@ -45,7 +47,7 @@ class Settings(BaseSettings):
     use_gemini: bool = True
 
     # Database (defaults to SQLite, but should use DATABASE_URL from .env)
-    database_url: str = "sqlite:///./fintrack.db"  # Will be overridden by .env
+    database_url: str = "sqlite:///./ledgi.db"  # Will be overridden by .env
 
     # JWT Authentication
     secret_key: str = "your-super-secret-key-change-in-production"  # Override in .env
@@ -62,7 +64,7 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
-    smtp_from_name: str = "Finance Buddy"
+    smtp_from_name: str = "Ledgi"
     smtp_use_tls: bool = True
 
     # Password Reset

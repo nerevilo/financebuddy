@@ -1,15 +1,18 @@
 """
 User Profile API Router
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 import json
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
+from ..core.logging_config import get_logger
 from ..models import UserProfile, User
+
+logger = get_logger(__name__)
 from ..models.models import generate_uuid
-from ..schemas import UserProfileCreate, UserProfileUpdate, UserProfileResponse
+from ..schemas import UserProfileUpdate, UserProfileResponse
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -41,8 +44,8 @@ async def get_profile(
     if profile.preferred_categories:
         try:
             preferred_categories = json.loads(profile.preferred_categories)
-        except:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse preferred_categories", extra={"error": str(e), "user_id": current_user.id})
 
     return UserProfileResponse(
         id=profile.id,
@@ -97,8 +100,8 @@ async def update_profile(
     if profile.preferred_categories:
         try:
             preferred_categories = json.loads(profile.preferred_categories)
-        except:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse preferred_categories", extra={"error": str(e), "user_id": current_user.id})
 
     return UserProfileResponse(
         id=profile.id,

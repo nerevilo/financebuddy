@@ -23,20 +23,14 @@ api_key_security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security),
     db: Session = Depends(get_db)
 ) -> User:
     """
     Dependency to get the current authenticated user.
 
-    Use this in routes that require authentication:
-        @router.get("/protected")
-        async def protected_route(current_user: User = Depends(get_current_user)):
-            ...
-
-    Raises:
-        HTTPException 401: If token is missing or invalid
-        HTTPException 403: If user account is deactivated
+    Reads token from: httpOnly cookie > Authorization header.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -44,7 +38,13 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    token = credentials.credentials
+    # Try cookie first, then Authorization header
+    token = request.cookies.get("access_token")
+    if not token and credentials:
+        token = credentials.credentials
+    if not token:
+        raise credentials_exception
+
     token_data = decode_token(token)
 
     if token_data is None or token_data.user_id is None:

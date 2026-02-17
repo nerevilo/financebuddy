@@ -14,11 +14,6 @@ interface User {
   created_at: string;
 }
 
-interface AuthTokens {
-  access_token: string;
-  refresh_token: string;
-}
-
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
@@ -32,10 +27,7 @@ interface AuthContextType {
 // Context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Token storage keys
-const ACCESS_TOKEN_KEY = 'fintrack_access_token';
-const REFRESH_TOKEN_KEY = 'fintrack_refresh_token';
-const USER_KEY = 'fintrack_user';
+const USER_KEY = 'ledgi_user';
 
 // Provider
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -43,46 +35,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  // Load user from localStorage on mount
+  // Load user from localStorage on mount (non-sensitive data only)
   useEffect(() => {
     const storedUser = localStorage.getItem(USER_KEY);
-    const storedToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-
-    if (storedUser && storedToken) {
+    if (storedUser) {
       try {
         setUser(JSON.parse(storedUser));
       } catch {
-        // Invalid stored data, clear it
         localStorage.removeItem(USER_KEY);
-        localStorage.removeItem(ACCESS_TOKEN_KEY);
-        localStorage.removeItem(REFRESH_TOKEN_KEY);
       }
     }
     setIsLoading(false);
   }, []);
 
-  const saveTokens = (tokens: AuthTokens, userData: User) => {
-    localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
-    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+  const saveUser = (userData: User) => {
     localStorage.setItem(USER_KEY, JSON.stringify(userData));
     setUser(userData);
   };
 
-  const clearTokens = () => {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  const clearUser = () => {
     localStorage.removeItem(USER_KEY);
+    // Also clear legacy token keys
+    localStorage.removeItem('fintrack_access_token');
+    localStorage.removeItem('fintrack_refresh_token');
+    localStorage.removeItem('fintrack_user');
     setUser(null);
   };
 
+  // getAccessToken returns null — tokens live in httpOnly cookies now.
+  // Kept for interface compat; callers should use credentials: 'include' instead.
   const getAccessToken = useCallback(() => {
-    return localStorage.getItem(ACCESS_TOKEN_KEY);
+    return null;
   }, []);
 
   const login = async (email: string, password: string) => {
     const response = await fetch(`${API_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ email, password }),
     });
 
@@ -92,16 +82,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const data = await response.json();
-    saveTokens(
-      { access_token: data.access_token, refresh_token: data.refresh_token },
-      data.user
-    );
+    saveUser(data.user);
   };
 
   const register = async (email: string, password: string, name?: string) => {
     const response = await fetch(`${API_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ email, password, name }),
     });
 
@@ -111,39 +99,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const data = await response.json();
-    saveTokens(
-      { access_token: data.access_token, refresh_token: data.refresh_token },
-      data.user
-    );
+    saveUser(data.user);
   };
 
-  const logout = useCallback(() => {
-    clearTokens();
+  const logout = useCallback(async () => {
+    try {
+      await fetch(`${API_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Ignore network errors on logout
+    }
+    clearUser();
     router.push('/login');
   }, [router]);
 
-  // Auto-refresh token
+  // Auto-refresh token via cookie
   useEffect(() => {
-    const refreshAccessToken = async () => {
-      const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-      if (!refreshToken) return;
+    if (!user) return;
 
+    const refreshAccessToken = async () => {
       try {
         const response = await fetch(`${API_URL}/api/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+          credentials: 'include',
+          body: JSON.stringify({}),
         });
 
         if (response.ok) {
           const data = await response.json();
-          saveTokens(
-            { access_token: data.access_token, refresh_token: data.refresh_token },
-            data.user
-          );
+          saveUser(data.user);
         } else {
-          // Refresh failed, logout
-          clearTokens();
+          clearUser();
         }
       } catch {
         // Network error, don't logout yet
@@ -153,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Refresh token every 25 minutes (token expires in 30)
     const interval = setInterval(refreshAccessToken, 25 * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   return (
     <AuthContext.Provider

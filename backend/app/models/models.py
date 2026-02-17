@@ -1,6 +1,6 @@
-from sqlalchemy import Column, String, Float, Date, DateTime, Boolean, ForeignKey, Text, Enum, Integer, Index
+from sqlalchemy import Column, String, Float, Date, DateTime, Boolean, ForeignKey, Text, Integer, Index
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import enum
 
@@ -60,8 +60,8 @@ class User(Base):
     name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=True)  # Nullable for migration, then required
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Enrichment budget tracking
     enrichment_budget = Column(Float, default=1.0)  # Max $1.00 per user
@@ -85,7 +85,7 @@ class Institution(Base):
     name = Column(String, nullable=False)
     status = Column(String, default="active")  # active, disconnected, error
     last_synced_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="institutions")
@@ -106,7 +106,7 @@ class Account(Base):
     currency = Column(String, default="USD")
     last_four = Column(String, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     institution = relationship("Institution", back_populates="accounts")
@@ -150,7 +150,7 @@ class Transaction(Base):
     teller_category = Column(String, nullable=True)  # Original category from Teller
     type = Column(String, nullable=True)  # card_payment, ach, transfer, etc.
     status = Column(String, default="posted")  # posted, pending
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # ML Enrichment Fields (Ntropy API results)
     enriched_merchant = Column(String, nullable=True)  # Clean merchant name from Ntropy
@@ -159,6 +159,11 @@ class Transaction(Base):
     categorization_source = Column(String, nullable=True, index=True)  # 'rule', 'bert', 'ntropy'
     categorization_confidence = Column(Float, nullable=True)  # Confidence score 0.0-1.0
     enriched_at = Column(DateTime, nullable=True)  # When enrichment was performed
+
+    # Enrichment Retry Queue Fields (serverless-friendly background processing)
+    enrichment_attempts = Column(Integer, default=0)  # Number of enrichment attempts
+    enrichment_error = Column(Text, nullable=True)  # Last error message if failed
+    enrichment_queued_at = Column(DateTime, nullable=True)  # When queued for enrichment
 
     # Anomaly Detection Fields (statistical analysis)
     is_anomaly = Column(Boolean, default=False, index=True)  # System-detected unusual transaction
@@ -191,7 +196,7 @@ class TransactionTag(Base):
     name = Column(String, nullable=False)
     color = Column(String, nullable=True)  # Hex color for display (e.g., "#3B82F6")
     tag_type = Column(String, default="custom")  # "predefined" or "custom"
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Unique constraint: user can't have duplicate tag names
     __table_args__ = (
@@ -210,7 +215,7 @@ class TransactionTagAssociation(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     transaction_id = Column(String, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True)
     tag_id = Column(String, ForeignKey("transaction_tags.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index('ix_transaction_tag_assoc_unique', 'transaction_id', 'tag_id', unique=True),
@@ -234,7 +239,7 @@ class TransferRule(Base):
     priority = Column(Float, default=0.0)  # Higher priority rules checked first
     description = Column(Text, nullable=True)  # Why this rule exists
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", backref="transfer_rules")
@@ -256,8 +261,8 @@ class MerchantCategoryRule(Base):
     category = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     times_applied = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", backref="merchant_category_rules")
@@ -286,8 +291,8 @@ class UserProfile(Base):
     insight_frequency = Column(String, default="daily")  # daily, weekly
     preferred_categories = Column(Text, nullable=True)  # JSON array of focus categories
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", backref="profile")
@@ -314,8 +319,8 @@ class IncomeSource(Base):
     last_received_date = Column(Date, nullable=True)
 
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", backref="income_sources")
@@ -348,8 +353,8 @@ class Goal(Base):
     suggestion_reason = Column(Text, nullable=True)  # Why this goal was suggested
     related_category = Column(String, nullable=True)  # Category that triggered suggestion
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -383,7 +388,7 @@ class Insight(Base):
     feedback_at = Column(DateTime, nullable=True)
 
     # Generation metadata
-    generated_at = Column(DateTime, default=datetime.utcnow)
+    generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     llm_source = Column(String, nullable=True)  # gemini_flash, claude_haiku
     generation_cost = Column(Float, default=0.0)  # Track costs
     prompt_version = Column(String, nullable=True)  # For A/B testing prompts
@@ -393,7 +398,7 @@ class Insight(Base):
     is_read = Column(Boolean, default=False)
     read_at = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", backref="insights")
@@ -410,8 +415,8 @@ class Conversation(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String, nullable=True)  # Auto-generated from first message
     status = Column(String, default="active")  # active, archived
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_message_at = Column(DateTime, nullable=True)
     message_count = Column(Integer, default=0)
 
@@ -451,7 +456,7 @@ class Message(Base):
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

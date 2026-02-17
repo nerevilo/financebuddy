@@ -29,7 +29,7 @@ async def get_accounts(
             Institution.status == "active",
             Institution.user_id == current_user.id
         )
-    ).all()
+    ).limit(100).all()
 
     result = []
     for acc in accounts:
@@ -94,7 +94,7 @@ async def get_balance_summary(
             Institution.status == "active",
             Institution.user_id == current_user.id
         )
-    ).all()
+    ).limit(100).all()
 
     total_balance = 0
     total_available = 0

@@ -55,7 +55,7 @@ export default function ForgotPasswordPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h1 className="text-center text-3xl font-bold tracking-tighter text-slate-900">
-            Finance Buddy
+            Ledgi
           </h1>
           <h2 className="mt-2 text-center text-xl tracking-tight text-slate-600">
             Reset your password

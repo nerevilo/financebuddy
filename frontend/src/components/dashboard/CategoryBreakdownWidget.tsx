@@ -152,13 +152,13 @@ export function CategoryBreakdownWidget({ categories: data }: CategoryBreakdownW
                 key={index}
                 onClick={() => setSelectedCategory({ category: category.category, emoji })}
                 onMouseEnter={() => prefetchCategoryMerchants(category.category)}
-                className="w-full flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-lg hover:bg-slate-50 group transition-colors"
+                className="w-full flex items-center gap-2 py-2.5 sm:py-1.5 px-2 -mx-2 rounded-lg hover:bg-slate-50 group transition-colors"
               >
                 {/* Emoji */}
                 <span className="text-base w-6 text-center flex-shrink-0">{emoji}</span>
 
                 {/* Category name */}
-                <span className="text-sm text-slate-700 capitalize truncate w-28 text-left flex-shrink-0">
+                <span className="text-sm text-slate-700 capitalize truncate w-24 sm:w-28 text-left flex-shrink-0">
                   {category.category}
                 </span>
 

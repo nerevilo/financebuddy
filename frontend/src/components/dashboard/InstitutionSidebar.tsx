@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { toast } from 'sonner';
 import {
   syncInstitution,
   disconnectInstitution,
@@ -21,9 +22,11 @@ declare global {
 
 interface InstitutionSidebarProps {
   onDataChange?: () => void;
+  isOpen?: boolean;       // Mobile state
+  onClose?: () => void;   // Mobile close handler
 }
 
-export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
+export function InstitutionSidebar({ onDataChange, isOpen, onClose }: InstitutionSidebarProps) {
   const { institutions, isLoading: loading, refresh: refreshInstitutions } = useInstitutions();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
@@ -93,9 +96,11 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
       await refreshAllData();
       onDataChange?.();
       setNotification({ type: 'success', message: `${institution?.name || 'Account'} synced successfully!` });
+      toast.success(`${institution?.name || 'Account'} synced`);
     } catch (error) {
       console.error('Sync failed:', error);
       setNotification({ type: 'error', message: `Failed to sync ${institution?.name || 'account'}. Please try again.` });
+      toast.error(`Failed to sync ${institution?.name || 'account'}`);
     } finally {
       setSyncingIds(prev => {
         const next = new Set(prev);
@@ -137,9 +142,11 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
           await refreshAllData();
           onDataChange?.();
           setNotification({ type: 'success', message: 'Bank connected! Your transactions are now available.' });
+          toast.success('Bank connected! Transactions are loading.');
         } catch (error) {
           console.error('Error saving connection:', error);
           setNotification({ type: 'error', message: 'Failed to connect bank. Please try again.' });
+          toast.error('Failed to connect bank');
         } finally {
           setAddingBank(false);
         }
@@ -193,21 +200,66 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
 
   if (loading) {
     return (
-      <aside className="w-72 bg-surface-sidebar flex flex-col fixed left-0 top-0 h-screen">
-        <div className="p-4 border-b border-slate-700">
-          <h2 className="font-semibold text-white">Connected Accounts</h2>
-        </div>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="animate-spin h-6 w-6 border-2 border-slate-400 border-t-transparent rounded-full" />
-        </div>
-      </aside>
+      <>
+        {/* Mobile backdrop */}
+        {isOpen && (
+          <div
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
+            onClick={onClose}
+          />
+        )}
+        <aside className={`
+          w-72 bg-surface-sidebar flex flex-col fixed left-0 top-0 h-screen z-50
+          transform transition-transform duration-300 ease-out
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+          lg:translate-x-0
+        `}>
+          <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+            <h2 className="font-semibold text-white">Connected Accounts</h2>
+            {/* Mobile close button */}
+            <button
+              onClick={onClose}
+              className="lg:hidden p-1 text-slate-400 hover:text-white rounded"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="animate-spin h-6 w-6 border-2 border-slate-400 border-t-transparent rounded-full" />
+          </div>
+        </aside>
+      </>
     );
   }
 
   return (
-    <aside className="w-72 bg-surface-sidebar flex flex-col fixed left-0 top-0 h-screen">
-      <div className="p-4 border-b border-slate-700">
-        <h2 className="font-semibold text-white tracking-tight">Finance Buddy</h2>
+    <>
+      {/* Mobile backdrop */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
+          onClick={onClose}
+        />
+      )}
+      <aside className={`
+        w-72 bg-surface-sidebar flex flex-col fixed left-0 top-0 h-screen z-50
+        transform transition-transform duration-300 ease-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0
+      `}>
+      <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+        <h2 className="font-semibold text-white tracking-tight">Ledgi</h2>
+        {/* Mobile close button */}
+        <button
+          onClick={onClose}
+          className="lg:hidden p-1 text-slate-400 hover:text-white rounded"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       {/* Notification Banner */}
@@ -283,7 +335,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
-          Finance Buddy
+          Ledgi
         </Link>
         <Link
           href="/settings"
@@ -452,6 +504,7 @@ export function InstitutionSidebar({ onDataChange }: InstitutionSidebarProps) {
           )}
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

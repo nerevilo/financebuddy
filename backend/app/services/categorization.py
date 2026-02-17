@@ -3,7 +3,7 @@ Transaction Categorization Services
 
 Handles transaction categorization, transfer detection, and merchant recognition.
 """
-from typing import Optional, List
+from typing import Optional
 from datetime import timedelta
 from sqlalchemy.orm import Session
 import json

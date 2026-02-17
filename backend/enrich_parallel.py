@@ -4,7 +4,6 @@ Fast Parallel Transaction Enrichment
 Processes transactions in parallel batches for much faster enrichment.
 """
 import asyncio
-import sys
 from datetime import datetime
 from app.core.database import SessionLocal
 from app.models.models import Transaction

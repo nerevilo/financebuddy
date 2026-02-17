@@ -14,11 +14,13 @@ httpx==0.26.0
 # Environment and config
 python-dotenv==1.0.0
 pydantic-settings==2.1.0
+email-validator>=2.1.0  # Required for pydantic EmailStr
 
 # Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1  # Pin bcrypt version for passlib compatibility
+cryptography>=42.0.0  # Fernet encryption for Teller tokens at rest
 
 # Email
 aiosmtplib>=3.0.0  # Async SMTP for password reset emails
@@ -36,5 +38,12 @@ anthropic>=0.18.0  # Claude API
 fastembed>=0.2.0  # Lightweight ONNX-based embeddings (no PyTorch needed)
 numpy>=1.24.0  # Required for embeddings
 
+# MCP server
+fastmcp>=2.0.0
+
 # Caching (optional - app works without Redis)
 redis>=5.0.0  # Redis client with async support
+
+# Testing
+pytest>=8.0.0
+httpx>=0.27.0  # Required by TestClient

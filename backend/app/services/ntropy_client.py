@@ -28,7 +28,21 @@ class NtropyClient:
         }
 
         # Default account holder ID (we'll use a consistent ID for all transactions)
-        self.default_account_holder_id = "fintrack-default-user"
+        self.default_account_holder_id = "ledgi-default-user"
+
+        # Shared HTTP client for connection reuse
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the shared HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=30.0, headers=self.headers)
+        return self._client
+
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
 
     async def create_account_holder(self, account_holder_id: str = None) -> bool:
         """
@@ -46,31 +60,28 @@ class NtropyClient:
         account_id = account_holder_id or self.default_account_holder_id
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/account_holders",
-                    headers=self.headers,
-                    json={
-                        "id": account_id,
-                        "type": "consumer"  # consumer or business
-                    }
-                )
+            client = await self._get_client()
+            response = await client.post(
+                f"{self.base_url}/account_holders",
+                json={
+                    "id": account_id,
+                    "type": "consumer"
+                }
+            )
 
-                # 200/201 = created, 400 with "already exists" = ok, 409 = conflict
-                if response.status_code in [200, 201]:
+            if response.status_code in [200, 201]:
+                return True
+            elif response.status_code == 400:
+                if "already exists" in response.text.lower():
                     return True
-                elif response.status_code == 400:
-                    # Check if it's because account holder already exists
-                    if "already exists" in response.text.lower():
-                        return True
-                    else:
-                        logger.error("Failed to create account holder", extra={"status_code": response.status_code, "response": response.text})
-                        return False
-                elif response.status_code == 409:
-                    return True  # Already exists
                 else:
                     logger.error("Failed to create account holder", extra={"status_code": response.status_code, "response": response.text})
                     return False
+            elif response.status_code == 409:
+                return True
+            else:
+                logger.error("Failed to create account holder", extra={"status_code": response.status_code, "response": response.text})
+                return False
 
         except Exception as e:
             logger.error("Error creating account holder", extra={"error": str(e)})
@@ -80,72 +91,55 @@ class NtropyClient:
         """
         Enrich a single transaction with Ntropy.
 
-        Args:
-            transaction: Transaction object to enrich
-
         Returns:
-            Dict with enrichment data:
-            {
-                "merchant": "Hardee's",
-                "category": "dining",
-                "location": {...},
-                "confidence": 0.95
-            }
-
-            Returns None if Ntropy is disabled or API call fails.
+            Dict with enrichment data or None if failed.
         """
         if not self.enabled:
             return None
 
         try:
-            # Determine entry_type (outgoing = expense/debit, incoming = income/credit)
             entry_type = "outgoing" if transaction.amount < 0 else "incoming"
 
-            # Ensure account holder exists
             await self.create_account_holder()
 
-            # Build payload
             payload = {
                 "id": transaction.id,
                 "description": transaction.description,
-                "amount": abs(float(transaction.amount)),  # Ntropy expects positive amount
+                "amount": abs(float(transaction.amount)),
                 "date": transaction.date.isoformat(),
                 "entry_type": entry_type,
                 "currency": "USD",
                 "account_holder_id": self.default_account_holder_id
             }
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/transactions",
-                    headers=self.headers,
-                    json=payload
-                )
+            client = await self._get_client()
+            response = await client.post(
+                f"{self.base_url}/transactions",
+                json=payload
+            )
 
-                if response.status_code != 200:
-                    logger.error("Ntropy API error", extra={"status_code": response.status_code, "response": response.text})
-                    return None
+            if response.status_code != 200:
+                logger.error("Ntropy API error", extra={"status_code": response.status_code, "response": response.text})
+                return None
 
-                data = response.json()
+            data = response.json()
 
-                # Extract merchant from entities.counterparty
-                merchant = None
-                if data.get("entities") and data["entities"].get("counterparty"):
-                    merchant = data["entities"]["counterparty"].get("name")
+            merchant = None
+            if data.get("entities") and data["entities"].get("counterparty"):
+                merchant = data["entities"]["counterparty"].get("name")
 
-                # Extract category from categories.general
-                category = None
-                if data.get("categories"):
-                    category = data["categories"].get("general")
+            category = None
+            if data.get("categories"):
+                category = data["categories"].get("general")
 
-                return {
-                    "merchant": merchant,
-                    "category": category,
-                    "location": data.get("location"),
-                    "logo": data.get("entities", {}).get("counterparty", {}).get("logo"),
-                    "website": data.get("entities", {}).get("counterparty", {}).get("website"),
-                    "confidence": 0.9  # Ntropy doesn't return confidence, default to 0.9
-                }
+            return {
+                "merchant": merchant,
+                "category": category,
+                "location": data.get("location"),
+                "logo": data.get("entities", {}).get("counterparty", {}).get("logo"),
+                "website": data.get("entities", {}).get("counterparty", {}).get("website"),
+                "confidence": 0.9
+            }
 
         except Exception as e:
             logger.error("Failed to enrich transaction", extra={"transaction_id": transaction.id, "error": str(e)})
@@ -157,13 +151,6 @@ class NtropyClient:
 
         Note: Ntropy API v3 doesn't support batch operations,
         so we process transactions sequentially.
-
-        Args:
-            transactions: List of Transaction objects
-
-        Returns:
-            List of enrichment dictionaries (same length as input)
-            None entries where enrichment failed
         """
         if not self.enabled:
             return [None] * len(transactions)
@@ -181,36 +168,28 @@ class NtropyClient:
         return self.enabled
 
     async def test_connection(self) -> bool:
-        """
-        Test the Ntropy API connection and credentials.
-
-        Returns:
-            bool: True if connection successful, False otherwise
-        """
+        """Test the Ntropy API connection and credentials."""
         if not self.enabled:
             return False
 
         try:
-            # Ensure account holder exists
             await self.create_account_holder()
 
-            # Create a test transaction
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/transactions",
-                    headers=self.headers,
-                    json={
-                        "id": "test-transaction-001",
-                        "description": "STARBUCKS STORE 12345",
-                        "amount": 10.00,
-                        "date": datetime.now().isoformat(),
-                        "entry_type": "outgoing",
-                        "currency": "USD",
-                        "account_holder_id": self.default_account_holder_id
-                    }
-                )
+            client = await self._get_client()
+            response = await client.post(
+                f"{self.base_url}/transactions",
+                json={
+                    "id": "test-transaction-001",
+                    "description": "STARBUCKS STORE 12345",
+                    "amount": 10.00,
+                    "date": datetime.now().isoformat(),
+                    "entry_type": "outgoing",
+                    "currency": "USD",
+                    "account_holder_id": self.default_account_holder_id
+                }
+            )
 
-                return response.status_code == 200
+            return response.status_code == 200
 
         except Exception as e:
             logger.error("Ntropy connection test failed", extra={"error": str(e)})

@@ -11,7 +11,7 @@ from ..core.auth import get_current_user
 from ..services.insight_generation_service import InsightGenerationService
 from ..models import Insight, User
 from ..schemas import (
-    InsightResponse, InsightFeedbackUpdate, DailyInsightsResponse, InsightHistory
+    InsightFeedbackUpdate, DailyInsightsResponse, InsightHistory
 )
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
@@ -27,7 +27,7 @@ async def get_daily_insights(
 
     Generates new insights if none exist for today.
     """
-    service = InsightGenerationService(db)
+    service = InsightGenerationService(db, user_id=current_user.id)
     insights = await service.generate_daily_insights(current_user.id)
 
     total_cost = sum(i.generation_cost or 0 for i in insights)
@@ -50,7 +50,7 @@ async def get_insight_history(
     current_user: User = Depends(get_current_user)
 ):
     """Get historical insights with feedback statistics."""
-    service = InsightGenerationService(db)
+    service = InsightGenerationService(db, user_id=current_user.id)
     return service.get_insight_history(
         current_user.id,
         limit=limit,
@@ -67,7 +67,7 @@ async def update_insight_feedback(
     current_user: User = Depends(get_current_user)
 ):
     """Update feedback on an insight (helpful, acted_on, dismissed)."""
-    service = InsightGenerationService(db)
+    service = InsightGenerationService(db, user_id=current_user.id)
 
     # Check ownership
     insight = db.query(Insight).filter(Insight.id == insight_id).first()
@@ -85,7 +85,7 @@ async def mark_insight_read(
     current_user: User = Depends(get_current_user)
 ):
     """Mark an insight as read."""
-    service = InsightGenerationService(db)
+    service = InsightGenerationService(db, user_id=current_user.id)
 
     # Check ownership
     insight = db.query(Insight).filter(Insight.id == insight_id).first()
@@ -102,7 +102,7 @@ async def regenerate_insights(
     current_user: User = Depends(get_current_user)
 ):
     """Force regeneration of daily insights (for testing/debugging)."""
-    service = InsightGenerationService(db)
+    service = InsightGenerationService(db, user_id=current_user.id)
 
     # Delete today's insights first
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)

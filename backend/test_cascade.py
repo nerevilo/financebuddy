@@ -9,7 +9,7 @@ Quick test to verify:
 """
 import asyncio
 from app.services.search_service import SearchService
-from app.services.semantic_matcher import SemanticMatcher, get_semantic_matcher
+from app.services.semantic_matcher import get_semantic_matcher
 from app.services.llm_enrichment import LLMEnrichmentService
 from app.services.llm_enrichment_advanced import AdvancedLLMEnrichment
 from app.core.config import get_settings

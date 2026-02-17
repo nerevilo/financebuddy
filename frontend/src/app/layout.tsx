@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Plus_Jakarta_Sans } from 'next/font/google'
+import { Toaster } from 'sonner'
 import './globals.css'
 import { Providers } from './providers'
 
@@ -11,7 +12,7 @@ const jakarta = Plus_Jakarta_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'FinTrack - Personal Finance Dashboard',
+  title: 'Ledgi - Personal Finance Dashboard',
   description: 'Track your spending across all your accounts',
 }
 
@@ -27,6 +28,7 @@ export default function RootLayout({
           <div className="min-h-screen bg-surface-base">
             {children}
           </div>
+          <Toaster position="bottom-right" richColors closeButton />
         </Providers>
       </body>
     </html>

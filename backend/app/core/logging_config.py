@@ -1,7 +1,7 @@
 """
 Logging Configuration Module
 
-Provides structured logging setup for the FinTrack API.
+Provides structured logging setup for the Ledgi API.
 - JSON format for production (machine-readable)
 - Human-readable format for development
 - Configurable log levels based on DEBUG setting

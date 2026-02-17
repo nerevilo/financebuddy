@@ -3,7 +3,6 @@ Verify Enrichment Quality by Comparing Against Ntropy
 """
 import asyncio
 import sqlite3
-import random
 from app.services.cascade_enrichment import CascadeEnrichment
 from app.services.ntropy_client import NtropyClient
 

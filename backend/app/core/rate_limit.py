@@ -5,7 +5,6 @@ Supports Redis for distributed rate limiting with graceful fallback to in-memory
 """
 import logging
 import time
-from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 from collections import defaultdict
 from threading import Lock
@@ -115,7 +114,7 @@ class RedisRateLimiter:
     Suitable for distributed deployments.
     """
 
-    def __init__(self, prefix: str = "financebuddy:ratelimit"):
+    def __init__(self, prefix: str = "ledgi:ratelimit"):
         self.prefix = prefix
 
     async def check_rate_limit(self, key: str, tier: str) -> Tuple[bool, dict]:

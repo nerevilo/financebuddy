@@ -5,8 +5,7 @@ Allows users to create, list, and revoke API keys for programmatic access.
 These endpoints require JWT authentication (managed via web UI).
 """
 import json
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -62,7 +61,7 @@ async def create_api_key(
     # Calculate expiration
     expires_at = None
     if request.expires_in_days:
-        expires_at = datetime.utcnow() + timedelta(days=request.expires_in_days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=request.expires_in_days)
 
     # Create database record
     api_key = APIKey(
@@ -106,7 +105,7 @@ async def list_api_keys(
     """
     keys = db.query(APIKey).filter(
         APIKey.user_id == current_user.id
-    ).order_by(APIKey.created_at.desc()).all()
+    ).order_by(APIKey.created_at.desc()).limit(50).all()
 
     key_responses = []
     for key in keys:
@@ -195,7 +194,7 @@ async def update_api_key(
     if request.is_active is not None:
         api_key.is_active = request.is_active
         if not request.is_active:
-            api_key.revoked_at = datetime.utcnow()
+            api_key.revoked_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(api_key)
@@ -238,7 +237,7 @@ async def revoke_api_key(
         )
 
     api_key.is_active = False
-    api_key.revoked_at = datetime.utcnow()
+    api_key.revoked_at = datetime.now(timezone.utc)
 
     db.commit()
 

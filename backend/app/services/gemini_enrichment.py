@@ -15,14 +15,15 @@ Benefits:
 - Fast (~300-500ms)
 - LLM response caching (7 days) for repeated merchant patterns
 """
+import asyncio
 import json
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
 from ..core.cache import get_cache, EnrichmentCacheKeys, CacheTTL
 from ..models.models import Transaction
 from .search_service import SearchService
-from .categories import get_all_category_ids, normalize_category_id
+from .categories import normalize_category_id
 
 logger = get_logger(__name__)
 
@@ -145,9 +146,12 @@ HINT FROM PATTERN MATCHING (verify or correct this):
 Use this as a starting point but make your own determination based on the transaction description.
 """
 
+        # Sanitize description for LLM prompt
+        safe_desc = transaction.description[:200].replace('"', '').replace("'", "")
+
         prompt = f"""Analyze this bank transaction and extract merchant information.
 
-Transaction Description: "{transaction.description}"
+<transaction_description>{safe_desc}</transaction_description>
 Amount: ${abs(transaction.amount)}
 {hint_text}
 {STANDARD_CATEGORIES_PROMPT}
@@ -201,12 +205,16 @@ Respond ONLY with valid JSON:
 }}"""
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 150,
-                }
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.model.generate_content,
+                    prompt,
+                    generation_config={
+                        "temperature": 0.1,
+                        "max_output_tokens": 150,
+                    }
+                ),
+                timeout=30
             )
 
             # Parse response
@@ -306,10 +314,13 @@ Respond ONLY with valid JSON:
                     for i, r in enumerate(search_results[:3])
                 ])
 
+        # Sanitize description for LLM prompt
+        safe_desc = transaction.description[:200].replace('"', '').replace("'", "")
+
         # Now ask Gemini to extract info (with or without search results)
         prompt = f"""Analyze this bank transaction:
 
-Transaction: "{transaction.description}"
+<transaction_description>{safe_desc}</transaction_description>
 Amount: ${abs(transaction.amount)}"""
 
         if search_results_text:
@@ -340,12 +351,16 @@ Extract and return ONLY valid JSON:
 }}"""
 
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 200,
-                }
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.model.generate_content,
+                    prompt,
+                    generation_config={
+                        "temperature": 0.1,
+                        "max_output_tokens": 200,
+                    }
+                ),
+                timeout=30
             )
 
             result = self._extract_json(response.text)
@@ -372,6 +387,194 @@ Extract and return ONLY valid JSON:
         except Exception as e:
             logger.error("Gemini with search error", extra={"error": str(e)})
             return None
+
+        return None
+
+    async def enrich_batch(
+        self,
+        transactions: List[Transaction],
+        batch_size: int = 8
+    ) -> List[Optional[Dict]]:
+        """
+        Batch enrichment - process multiple transactions in a single LLM call.
+
+        This reduces API calls by 5-10x while staying within rate limits.
+
+        Args:
+            transactions: List of transactions to enrich
+            batch_size: Number of transactions per API call (default: 8)
+
+        Returns:
+            List of enrichment results (same order as input transactions)
+            Each result is either a dict or None if enrichment failed
+        """
+        if not self.model or not transactions:
+            return [None] * len(transactions)
+
+        cache = get_cache()
+        results: List[Optional[Dict]] = [None] * len(transactions)
+        uncached_indices: List[int] = []
+        uncached_transactions: List[Transaction] = []
+
+        # Step 1: Check cache for each transaction
+        for i, tx in enumerate(transactions):
+            cache_key = EnrichmentCacheKeys.gemini_result(tx.description)
+            cached_result = await cache.get(cache_key)
+            if cached_result:
+                cached_result["source"] = "gemini_flash_cached"
+                cached_result["cost"] = 0.0
+                cached_result["cached"] = True
+                results[i] = cached_result
+                logger.debug("Batch cache hit", extra={"description": tx.description[:30]})
+            else:
+                uncached_indices.append(i)
+                uncached_transactions.append(tx)
+
+        if not uncached_transactions:
+            logger.info("Batch enrichment: all from cache", extra={"count": len(transactions)})
+            return results
+
+        # Step 2: Process uncached transactions in batches
+        for batch_start in range(0, len(uncached_transactions), batch_size):
+            batch_end = min(batch_start + batch_size, len(uncached_transactions))
+            batch_txns = uncached_transactions[batch_start:batch_end]
+            batch_indices = uncached_indices[batch_start:batch_end]
+
+            # Build batch prompt (sanitize descriptions)
+            tx_list = "\n".join([
+                f'{i+1}. <transaction_description>{tx.description[:200].replace(chr(34), "").replace(chr(39), "")}</transaction_description> - ${abs(tx.amount):.2f}'
+                for i, tx in enumerate(batch_txns)
+            ])
+
+            prompt = f"""Analyze these bank transactions and extract merchant information for EACH one.
+
+TRANSACTIONS:
+{tx_list}
+
+{STANDARD_CATEGORIES_PROMPT}
+
+RULES:
+1. Internal bank transactions (transfers, deposits, withdrawals) → merchant: null, category: "internal_transfer"
+2. P2P payments (Zelle, Venmo, PayPal) → merchant: null, category: "external_transfer"
+3. Gas at retail stores (COSTCO GAS, WALMART FUEL) → category: "gas_stations" (NOT groceries)
+4. Software/AI tools (Claude, OpenAI, GitHub, Cursor) → category: "software_subscriptions"
+5. For real purchases, extract clean merchant name and appropriate category
+
+Return a JSON ARRAY with exactly {len(batch_txns)} objects, one for each transaction in order:
+[
+  {{"merchant": "Name or null", "category": "category_id", "confidence": 0.0-1.0}},
+  {{"merchant": "Name or null", "category": "category_id", "confidence": 0.0-1.0}},
+  ...
+]
+
+IMPORTANT: Return ONLY the JSON array, no other text."""
+
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.model.generate_content,
+                        prompt,
+                        generation_config={
+                            "temperature": 0.1,
+                            "max_output_tokens": 100 * len(batch_txns),
+                        }
+                    ),
+                    timeout=30
+                )
+
+                batch_results = self._extract_json_array(response.text)
+
+                if batch_results and len(batch_results) == len(batch_txns):
+                    # Successfully parsed batch response
+                    for j, (idx, tx, result) in enumerate(zip(batch_indices, batch_txns, batch_results)):
+                        if result and isinstance(result, dict):
+                            if result.get("category"):
+                                result["category"] = normalize_category_id(result["category"])
+                            result["source"] = "gemini_flash_batch"
+                            result["cost"] = 0.000075 / len(batch_txns)  # Split cost across batch
+                            result["cached"] = False
+                            results[idx] = result
+
+                            # Cache individual result
+                            cache_key = EnrichmentCacheKeys.gemini_result(tx.description)
+                            await cache.set(cache_key, result, ttl=CacheTTL.LLM_ENRICHMENT)
+
+                    logger.info("Batch enrichment success", extra={
+                        "batch_size": len(batch_txns),
+                        "successful": sum(1 for r in batch_results if r)
+                    })
+                else:
+                    # Batch parsing failed, fall back to individual calls
+                    logger.warning("Batch parse failed, falling back to individual", extra={
+                        "expected": len(batch_txns),
+                        "got": len(batch_results) if batch_results else 0
+                    })
+                    for idx, tx in zip(batch_indices, batch_txns):
+                        individual_result = await self.enrich_basic(tx)
+                        results[idx] = individual_result
+
+            except Exception as e:
+                logger.error("Batch enrichment error", extra={"error": str(e)})
+                # Fall back to individual calls for this batch
+                for idx, tx in zip(batch_indices, batch_txns):
+                    try:
+                        individual_result = await self.enrich_basic(tx)
+                        results[idx] = individual_result
+                    except Exception as inner_e:
+                        logger.error("Individual fallback failed", extra={"error": str(inner_e)})
+                        results[idx] = None
+
+        return results
+
+    def _extract_json_array(self, text: str) -> Optional[List[Dict]]:
+        """
+        Extract JSON array from Gemini's response.
+
+        Handles:
+        - Pure JSON array
+        - JSON array in markdown code blocks
+        - JSON array with surrounding text
+        """
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return parsed
+        except:
+            pass
+
+        # Try extracting from code block
+        if "```json" in text:
+            start = text.find("```json") + 7
+            end = text.find("```", start)
+            if end > start:
+                try:
+                    parsed = json.loads(text[start:end].strip())
+                    if isinstance(parsed, list):
+                        return parsed
+                except:
+                    pass
+
+        if "```" in text:
+            start = text.find("```") + 3
+            end = text.find("```", start)
+            if end > start:
+                try:
+                    parsed = json.loads(text[start:end].strip())
+                    if isinstance(parsed, list):
+                        return parsed
+                except:
+                    pass
+
+        # Try extracting from [ to ]
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(text[start:end])
+                if isinstance(parsed, list):
+                    return parsed
+            except:
+                pass
 
         return None
 

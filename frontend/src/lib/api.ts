@@ -1,32 +1,22 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-// Get auth token from localStorage
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('fintrack_access_token');
-}
-
 export async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const token = getAuthToken();
-
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
     ...options?.headers,
   };
 
-  // Add auth header if token exists
-  if (token) {
-    (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
-  }
-
   const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
     headers,
+    credentials: 'include',
   });
 
   // Handle 401 Unauthorized - redirect to login
   if (response.status === 401) {
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('ledgi_user');
+      // Clear legacy keys
       localStorage.removeItem('fintrack_access_token');
       localStorage.removeItem('fintrack_refresh_token');
       localStorage.removeItem('fintrack_user');

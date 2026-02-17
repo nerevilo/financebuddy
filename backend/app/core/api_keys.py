@@ -6,9 +6,10 @@ Example: fb_sk_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
 
 Keys are stored as SHA-256 hashes - the raw key is only returned once at creation.
 """
+import hmac
 import secrets
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -17,7 +18,7 @@ from ..models.api_key import APIKey
 from ..models import User
 
 
-# Key prefix for Finance Buddy API keys
+# Key prefix for Ledgi API keys
 API_KEY_PREFIX = "fb_sk_"
 
 
@@ -85,18 +86,19 @@ def validate_api_key(key: str, db: Session) -> Optional[Tuple[User, APIKey]]:
         return None
 
     key_hash = hash_api_key(key)
+    key_prefix = key[:12]
 
-    # Find the API key record
+    # Find candidates by prefix, then verify with timing-safe comparison
     api_key = db.query(APIKey).filter(
-        APIKey.key_hash == key_hash,
+        APIKey.key_prefix == key_prefix,
         APIKey.is_active == True
     ).first()
 
-    if not api_key:
+    if not api_key or not hmac.compare_digest(api_key.key_hash, key_hash):
         return None
 
     # Check expiration
-    if api_key.expires_at and api_key.expires_at < datetime.utcnow():
+    if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
         return None
 
     # Get the user
@@ -109,7 +111,7 @@ def validate_api_key(key: str, db: Session) -> Optional[Tuple[User, APIKey]]:
         return None
 
     # Update last used timestamp
-    api_key.last_used_at = datetime.utcnow()
+    api_key.last_used_at = datetime.now(timezone.utc)
     db.commit()
 
     return user, api_key

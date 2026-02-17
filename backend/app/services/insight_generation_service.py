@@ -4,12 +4,12 @@ LLM-Powered Insight Generation Service
 Generates 3 daily insights using Gemini Flash (FREE tier).
 """
 import json
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from typing import Dict, List, Optional
 
-from ..models import Insight, Goal, IncomeSource, UserProfile
+from ..models import Insight, UserProfile
 from ..models.models import generate_uuid
 from ..core.config import get_settings
 from ..core.logging_config import get_logger
@@ -38,10 +38,10 @@ class InsightGenerationService:
 
     PROMPT_VERSION = "v1.0"
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: str):
         self.db = db
         self.settings = get_settings()
-        self.dashboard_service = DashboardService(db)
+        self.dashboard_service = DashboardService(db, user_id=user_id)
         self.income_service = IncomeService(db)
         self.goal_service = GoalService(db)
 
@@ -430,8 +430,8 @@ Respond ONLY with the JSON array, no other text."""
             llm_source=data.get('llm_source'),
             generation_cost=data.get('generation_cost', 0.0),
             prompt_version=data.get('prompt_version'),
-            expires_at=datetime.utcnow() + timedelta(days=1),  # Valid for 24 hours
-            generated_at=datetime.utcnow()
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),  # Valid for 24 hours
+            generated_at=datetime.now(timezone.utc)
         )
 
         self.db.add(insight)
@@ -459,7 +459,7 @@ Respond ONLY with the JSON array, no other text."""
 
         if insight:
             insight.feedback = feedback
-            insight.feedback_at = datetime.utcnow()
+            insight.feedback_at = datetime.now(timezone.utc)
             self.db.commit()
 
         return insight
@@ -470,7 +470,7 @@ Respond ONLY with the JSON array, no other text."""
 
         if insight:
             insight.is_read = True
-            insight.read_at = datetime.utcnow()
+            insight.read_at = datetime.now(timezone.utc)
             self.db.commit()
 
         return insight

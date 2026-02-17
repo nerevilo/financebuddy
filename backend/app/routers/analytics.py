@@ -5,16 +5,14 @@ API endpoints for spending analysis and insights.
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, Query as SQLQuery
-from sqlalchemy import func, and_, extract, or_, not_
+from sqlalchemy import func, and_, or_, not_
 from typing import Optional
 from datetime import date, timedelta
-from collections import defaultdict
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
 from ..models import Transaction, Account, Institution, User
 from ..schemas import SpendingByCategory, SpendingByMerchant
-from ..services.categorization import TransferDetector
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -139,7 +137,7 @@ async def get_spending_by_category(
     # Group by category and execute
     results = base_query.group_by(
         func.coalesce(Transaction.teller_category, 'uncategorized')
-    ).all()
+    ).limit(50).all()
 
     # Calculate percentages
     grand_total = sum(r.total for r in results) if results else 0
@@ -245,7 +243,7 @@ async def get_spending_by_merchant(
 
 @router.get("/spending/trends")
 async def get_spending_trends(
-    granularity: str = Query(default="monthly"),  # daily, weekly, monthly
+    granularity: str = Query(default="monthly", pattern="^(daily|weekly|monthly)$"),
     months: int = Query(default=6, le=24),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -354,7 +352,7 @@ async def get_period_comparison(
         cat_query = apply_transfer_filters(cat_query)
         by_cat = {r.category: float(r.total) for r in cat_query.group_by(
             func.coalesce(Transaction.teller_category, 'uncategorized')
-        ).all()}
+        ).limit(100).all()}
 
         return float(total), by_cat
 

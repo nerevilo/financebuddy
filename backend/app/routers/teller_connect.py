@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from ..core.database import get_db, SessionLocal
 from ..core.auth import get_current_user
+from ..core.encryption import encrypt_value, decrypt_value
 from ..core.logging_config import get_logger
 from ..models import Institution, Account, Transaction, User
 from ..services.teller import TellerService
@@ -61,10 +62,10 @@ async def handle_teller_connect(
     ).first()
 
     if existing:
-        # Update access token
-        existing.teller_access_token = access_token
+        # Update access token (encrypted at rest)
+        existing.teller_access_token = encrypt_value(access_token)
         existing.status = "active"
-        existing.last_synced_at = datetime.utcnow()
+        existing.last_synced_at = datetime.now(timezone.utc)
         db.commit()
         institution = existing
     else:
@@ -72,10 +73,10 @@ async def handle_teller_connect(
         institution = Institution(
             user_id=user.id,
             teller_enrollment_id=enrollment.get("id"),
-            teller_access_token=access_token,
+            teller_access_token=encrypt_value(access_token),
             name=enrollment.get("institution", {}).get("name", "Unknown Bank"),
             status="active",
-            last_synced_at=datetime.utcnow()
+            last_synced_at=datetime.now(timezone.utc)
         )
         db.add(institution)
         db.commit()
@@ -96,7 +97,7 @@ async def handle_teller_connect(
                 existing_account.name = acc_data.get("name", "Account")
                 existing_account.type = acc_data.get("type", "depository")
                 existing_account.subtype = acc_data.get("subtype")
-                existing_account.last_synced_at = datetime.utcnow()
+                existing_account.last_synced_at = datetime.now(timezone.utc)
             else:
                 # Create new account
                 account = Account(
@@ -107,7 +108,7 @@ async def handle_teller_connect(
                     subtype=acc_data.get("subtype"),
                     currency=acc_data.get("currency", "USD"),
                     last_four=acc_data.get("last_four"),
-                    last_synced_at=datetime.utcnow()
+                    last_synced_at=datetime.now(timezone.utc)
                 )
                 db.add(account)
 
@@ -140,7 +141,7 @@ async def sync_institution(
     if not institution:
         raise HTTPException(status_code=404, detail="Institution not found")
 
-    teller = TellerService(access_token=institution.teller_access_token)
+    teller = TellerService(access_token=decrypt_value(institution.teller_access_token))
 
     # Sync accounts
     accounts_data = await teller.get_accounts()
@@ -165,7 +166,7 @@ async def sync_institution(
                 last_four=acc_data.get("last_four")
             )
             db.add(account)
-            db.commit()
+            db.flush()
             db.refresh(account)
 
         # Get balances
@@ -180,12 +181,19 @@ async def sync_institution(
         try:
             transactions_data = await teller.get_transactions(acc_data["id"])
 
-            for tx_data in transactions_data:
-                existing_tx = db.query(Transaction).filter(
-                    Transaction.teller_transaction_id == tx_data["id"]
-                ).first()
+            # Get existing transaction IDs for this account (for deduplication)
+            existing_teller_ids = set(
+                tx_id for (tx_id,) in db.query(Transaction.teller_transaction_id).filter(
+                    Transaction.teller_transaction_id.in_([tx["id"] for tx in transactions_data])
+                ).all()
+            )
 
-                if not existing_tx:
+            # BULK INSERT: Collect all new transactions first
+            new_transactions = []
+            from datetime import date as date_type
+
+            for tx_data in transactions_data:
+                if tx_data["id"] not in existing_teller_ids:
                     # Parse amount (Teller returns as string)
                     amount = float(tx_data.get("amount", 0))
 
@@ -195,7 +203,6 @@ async def sync_institution(
 
                     # Parse date string to date object
                     date_str = tx_data.get("date")
-                    from datetime import date as date_type
                     tx_date = datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else date_type.today()
 
                     tx = Transaction(
@@ -209,10 +216,19 @@ async def sync_institution(
                         type=tx_data.get("type"),
                         status=tx_data.get("status", "posted")
                     )
-                    db.add(tx)
-                    db.flush()  # Get the ID assigned
-                    new_transaction_ids.append(tx.id)
-                    synced_transactions += 1
+                    new_transactions.append(tx)
+
+            # Bulk insert all new transactions at once (much faster!)
+            if new_transactions:
+                db.bulk_save_objects(new_transactions, return_defaults=True)
+                db.flush()  # Single flush for all transactions
+                new_transaction_ids.extend([tx.id for tx in new_transactions])
+                synced_transactions += len(new_transactions)
+
+                logger.info("Bulk inserted transactions", extra={
+                    "count": len(new_transactions),
+                    "account_id": acc_data['id']
+                })
 
         except Exception as e:
             logger.error("Error syncing transactions", extra={"error": str(e), "account_id": acc_data['id']})
@@ -256,7 +272,7 @@ async def disconnect_institution(
 
     # Try to delete enrollment from Teller
     try:
-        teller = TellerService(access_token=institution.teller_access_token)
+        teller = TellerService(access_token=decrypt_value(institution.teller_access_token))
         await teller.delete_enrollment()
     except Exception as e:
         logger.error("Error deleting Teller enrollment", extra={"error": str(e), "institution_id": institution_id})

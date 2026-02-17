@@ -3,9 +3,9 @@ Income Detection and Management Service
 
 Auto-detects recurring deposits and manages income sources.
 """
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import and_
 from typing import Dict, List, Optional
 from collections import defaultdict
 import re
@@ -273,7 +273,7 @@ class IncomeService:
             if value is not None and hasattr(source, key):
                 setattr(source, key, value)
 
-        source.updated_at = datetime.utcnow()
+        source.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         return source
 

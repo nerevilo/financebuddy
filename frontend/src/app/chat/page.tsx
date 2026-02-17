@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquarePlus, ChevronLeft, History } from 'lucide-react';
+import { toast } from 'sonner';
 import { useChat, useConversations } from '@/lib/hooks';
 import { MessageList } from '@/components/chat/MessageList';
 import { MessageBubble } from '@/components/chat/MessageBubble';
@@ -55,19 +56,23 @@ function ChatPageContent() {
           const result = await sendMessage(newConv.id, text);
           if (!result) {
             setSendError('Failed to send message. Please try again.');
+            toast.error('Failed to send message');
           }
         } else {
           setSendError('Failed to create conversation. Please try again.');
+          toast.error('Failed to create conversation');
         }
       } else {
         const result = await sendMessage(activeConversationId, text);
         if (!result) {
           setSendError('Failed to send message. Please try again.');
+          toast.error('Failed to send message');
         }
       }
     } catch (err) {
       console.error('Chat error:', err);
       setSendError('An unexpected error occurred. Please try again.');
+      toast.error('An unexpected error occurred');
     }
   };
 
@@ -131,7 +136,7 @@ function ChatPageContent() {
                 <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
                   <Link href="/" className="hover:text-slate-700">Dashboard</Link>
                   <span>/</span>
-                  <span className="text-slate-900">Finance Buddy Chat</span>
+                  <span className="text-slate-900">Ledgi Chat</span>
                 </div>
                 <h1 className="text-xl font-bold tracking-tight text-slate-900">
                   {activeConversation?.title || 'New Conversation'}
@@ -208,7 +213,7 @@ function WelcomeScreen() {
         </svg>
       </div>
       <h2 className="text-2xl font-bold text-slate-900 mb-3">
-        Hi! I'm Finance Buddy
+        Hi! I'm Ledgi
       </h2>
       <p className="text-slate-600 max-w-md mb-8">
         Your AI-powered financial assistant. I can help you understand your spending,

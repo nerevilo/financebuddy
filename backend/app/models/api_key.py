@@ -1,11 +1,11 @@
 """
-API Key model for programmatic access to the Finance Buddy API.
+API Key model for programmatic access to the Ledgi API.
 
 Supports LLM access (like Claude Code) and other integrations.
 """
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..core.database import Base
 
@@ -48,7 +48,7 @@ class APIKey(Base):
     expires_at = Column(DateTime, nullable=True)  # Optional expiration
 
     # Audit
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     revoked_at = Column(DateTime, nullable=True)
 
     # Relationships

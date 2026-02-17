@@ -7,14 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import and_, or_, func, desc, asc
 from typing import List, Optional, Literal
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
 from ..core.cache import get_cache, CacheService
 from ..models import Transaction, Account, Institution, User, TransactionTag, TransactionTagAssociation, MerchantCategoryRule
 from ..schemas import (
-    TransactionResponse, TransactionCategoryUpdate, TransactionListResponse, CategoryResponse,
+    TransactionResponse, CategoryResponse,
     TransactionDetailResponse, TransactionUpdateRequest, TransactionListWithAnomaliesResponse, TagResponse,
     CategoryUpdateWithRuleRequest, CategoryUpdateWithRuleResponse, MerchantCheckResponse,
     MerchantCategoryRuleResponse, MerchantCategoryRulesListResponse
@@ -91,7 +91,9 @@ async def get_recent_transactions(
     """Get recent transactions from the last N days."""
     start_date = date.today() - timedelta(days=days)
 
-    transactions = db.query(Transaction).join(Account).join(Institution).filter(
+    transactions = db.query(Transaction).join(Account).join(Institution).options(
+        selectinload(Transaction.account)
+    ).filter(
         and_(
             Institution.status == "active",
             Institution.user_id == current_user.id,
@@ -121,7 +123,8 @@ async def search_transactions(
     current_user: User = Depends(get_current_user)
 ):
     """Search transactions by description or merchant name."""
-    search_term = f"%{q}%"
+    escaped_q = q.replace("%", r"\%").replace("_", r"\_")
+    search_term = f"%{escaped_q}%"
 
     transactions = db.query(Transaction).join(Account).join(Institution).filter(
         and_(
@@ -167,7 +170,7 @@ async def get_categories(
         Transaction.enriched_category
     ).order_by(
         desc('count')
-    ).all()
+    ).limit(200).all()
 
     return [
         CategoryResponse(
@@ -239,7 +242,8 @@ async def get_transactions_paginated(
 
     # Search filter (description, merchant_name, enriched_merchant)
     if q:
-        search_term = f"%{q}%"
+        escaped_q = q.replace("%", r"\%").replace("_", r"\_")
+        search_term = f"%{escaped_q}%"
         base_query = base_query.filter(
             or_(
                 Transaction.description.ilike(search_term),
@@ -366,7 +370,7 @@ async def update_transaction_category(
     tx.enriched_category = update.category
     tx.categorization_source = "user"
     tx.categorization_confidence = 1.0
-    tx.enriched_at = datetime.utcnow()
+    tx.enriched_at = datetime.now(timezone.utc)
 
     rule_created = False
     rule_id = None
@@ -383,7 +387,7 @@ async def update_transaction_category(
 
         if existing_rule:
             existing_rule.category = update.category
-            existing_rule.updated_at = datetime.utcnow()
+            existing_rule.updated_at = datetime.now(timezone.utc)
             existing_rule.is_active = True
             rule_id = existing_rule.id
         else:
@@ -408,7 +412,7 @@ async def update_transaction_category(
             Transaction.enriched_category: update.category,
             Transaction.categorization_source: "user_rule",
             Transaction.categorization_confidence: 1.0,
-            Transaction.enriched_at: datetime.utcnow()
+            Transaction.enriched_at: datetime.now(timezone.utc)
         }, synchronize_session=False)
 
         # Update rule's times_applied counter
@@ -520,14 +524,14 @@ async def update_transaction(
     # Update merchant name if provided
     if update.merchant_name is not None:
         tx.enriched_merchant = update.merchant_name
-        tx.enriched_at = datetime.utcnow()
+        tx.enriched_at = datetime.now(timezone.utc)
 
     # Update category if provided
     if update.category is not None:
         tx.enriched_category = update.category
         tx.categorization_source = "user"
         tx.categorization_confidence = 1.0
-        tx.enriched_at = datetime.utcnow()
+        tx.enriched_at = datetime.now(timezone.utc)
 
     # Update tags if provided
     if update.tag_ids is not None:

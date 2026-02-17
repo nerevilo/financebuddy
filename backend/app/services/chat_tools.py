@@ -3,11 +3,10 @@ Chat Tools - Function definitions and executors for the chat agent.
 
 These tools give the chatbot access to financial data and actions.
 """
-import json
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func, extract
+from sqlalchemy import and_, or_, func
 
 from ..models import Transaction, Account, Institution, Goal, TransactionTag
 from ..models.models import generate_uuid

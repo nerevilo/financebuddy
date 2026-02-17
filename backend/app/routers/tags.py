@@ -3,10 +3,9 @@ Tags Router
 
 API endpoints for managing transaction tags.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from typing import List
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
@@ -64,7 +63,7 @@ async def get_tags(
     # Get all tags for user
     tags = db.query(TransactionTag).filter(
         TransactionTag.user_id == current_user.id
-    ).order_by(TransactionTag.tag_type, TransactionTag.name).all()
+    ).order_by(TransactionTag.tag_type, TransactionTag.name).limit(200).all()
 
     predefined = [
         TagResponse(

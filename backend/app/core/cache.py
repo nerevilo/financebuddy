@@ -7,8 +7,7 @@ If Redis is not configured, falls back to in-memory LRU cache.
 import json
 import logging
 import time
-from typing import Any, Optional, Dict, Tuple
-from functools import wraps
+from typing import Any, Optional, Tuple
 from collections import OrderedDict
 import threading
 
@@ -124,12 +123,12 @@ class CacheService:
     This ensures the application works with or without Redis.
     """
 
-    def __init__(self, prefix: str = "financebuddy"):
+    def __init__(self, prefix: str = "ledgi"):
         """
         Initialize cache service.
 
         Args:
-            prefix: Key prefix for all cache keys (default: "financebuddy")
+            prefix: Key prefix for all cache keys (default: "ledgi")
         """
         self.prefix = prefix
 
@@ -346,30 +345,75 @@ class EnrichmentCacheKeys:
 
     @staticmethod
     def _normalize_description(description: str) -> str:
-        """Normalize description for consistent cache keys."""
+        """
+        Normalize description for consistent cache keys.
+
+        OPTIMIZED: Extract canonical merchant name for better cache hit rates.
+
+        Examples:
+        - "STARBUCKS #12345 NYC" → "STARBUCKS"
+        - "STARBUCKS COFFEE #98765 LA" → "STARBUCKS" (cache HIT!)
+        - "COSTCO GAS #1234" → "COSTCO_GAS"
+        - "COSTCO WHSE #5678" → "COSTCO_WHSE"
+        """
         import re
         import hashlib
-        # Remove common prefixes, numbers, and normalize
+
+        # 1. Uppercase and strip
         normalized = description.upper().strip()
-        # Remove common transaction prefixes
+
+        # 2. Remove common transaction prefixes
         prefixes = [
             "DEBIT CARD PURCHASE - ",
             "CREDIT CARD PURCHASE - ",
             "ONLINE PURCHASE - ",
+            "PURCHASE - ",
+            "POS PURCHASE ",
             "POS ",
             "ACH ",
+            "CHECKCARD ",
+            "VISA ",
+            "MASTERCARD ",
         ]
         for prefix in prefixes:
             if normalized.startswith(prefix):
                 normalized = normalized[len(prefix):]
                 break
-        # Remove store numbers (3-6 digits) and trailing location codes
-        normalized = re.sub(r'\s*#?\d{3,6}\s*', ' ', normalized)
+
+        # 3. Remove ALL numbers (store numbers, locations, dates, etc.)
+        # This is more aggressive than before but increases cache hits
+        normalized = re.sub(r'#?\d{3,}', '', normalized)
+
+        # 4. Remove common suffixes that don't help identify merchants
+        suffixes = [
+            ' COFFEE', ' STORE', ' STORES', ' WHSE', ' WAREHOUSE',
+            ' INC', ' LLC', ' CORP', ' CO', ' LTD',
+            ' COM', '.COM', ' WEB', ' ONLINE',
+        ]
+        for suffix in suffixes:
+            if normalized.endswith(suffix):
+                normalized = normalized[:-len(suffix)]
+                break
+
+        # 5. Clean up special characters and whitespace
+        normalized = re.sub(r'[#*@.,\-_]+', ' ', normalized)
         normalized = re.sub(r'\s+', ' ', normalized).strip()
-        # Create short hash for very long descriptions
-        if len(normalized) > 50:
-            return hashlib.md5(normalized.encode()).hexdigest()[:16]
-        return normalized.replace(' ', '_').replace('.', '_')[:50]
+
+        # 6. Take first 2-3 significant words only (skip tiny words)
+        words = normalized.split()
+        significant_words = [w for w in words if len(w) > 2][:3]
+
+        if significant_words:
+            cache_key = '_'.join(significant_words)
+        else:
+            # Fallback: use first 2 words if no significant words found
+            cache_key = '_'.join(words[:2]) if words else 'UNKNOWN'
+
+        # 7. Limit length, hash if too long
+        if len(cache_key) > 40:
+            return hashlib.md5(cache_key.encode()).hexdigest()[:16]
+
+        return cache_key[:40]
 
     @staticmethod
     def llm_result(description: str) -> str:

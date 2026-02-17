@@ -46,7 +46,7 @@ export default function RegisterPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h1 className="text-center text-3xl font-bold tracking-tighter text-slate-900">
-            Finance Buddy
+            Ledgi
           </h1>
           <h2 className="mt-2 text-center text-xl tracking-tight text-slate-600">
             Create your account
@@ -153,6 +153,17 @@ export default function RegisterPage() {
             <span className="text-slate-600">Already have an account? </span>
             <Link href="/login" className="font-medium text-slate-700 hover:text-slate-900">
               Sign in
+            </Link>
+          </div>
+
+          <div className="text-center text-xs text-slate-500">
+            By creating an account, you agree to our{' '}
+            <Link href="/terms" className="underline hover:text-slate-700">
+              Terms of Service
+            </Link>
+            {' '}and{' '}
+            <Link href="/privacy" className="underline hover:text-slate-700">
+              Privacy Policy
             </Link>
           </div>
         </form>

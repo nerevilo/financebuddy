@@ -12,14 +12,10 @@ Key Features:
 4. Falls back gracefully if ML libraries unavailable
 """
 import re
-from typing import Dict, List, Optional, Tuple
-from functools import lru_cache
+from typing import Dict, Optional, Tuple
 from ..core.logging_config import get_logger
 from .categories import (
-    CATEGORIES,
-    CATEGORY_TEXTS_FOR_EMBEDDING,
-    normalize_category_id,
-    get_category
+    CATEGORY_TEXTS_FOR_EMBEDDING
 )
 
 logger = get_logger(__name__)

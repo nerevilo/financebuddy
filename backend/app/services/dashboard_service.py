@@ -3,10 +3,9 @@ Dashboard Service - Analytics and Insights Generation
 """
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, extract
+from sqlalchemy import func, and_, or_, extract, text
 from typing import Dict, List, Optional
 from ..models.models import Transaction, Account, Institution
-import statistics
 
 
 class DashboardService:
@@ -355,7 +354,9 @@ class DashboardService:
 
     def get_category_breakdown(self, month: Optional[int] = None, year: Optional[int] = None) -> Dict:
         """
-        Get spending breakdown by category for a specific month
+        Get spending breakdown by category for a specific month.
+
+        OPTIMIZED: Tries materialized view first (PostgreSQL only), falls back to raw query.
 
         Returns categories sorted by amount with percentages
         """
@@ -363,6 +364,71 @@ class DashboardService:
         target_month = month or now.month
         target_year = year or now.year
 
+        # Try materialized view first (PostgreSQL only, much faster)
+        mv_result = self._try_materialized_view_categories(target_year, target_month)
+        if mv_result is not None:
+            return mv_result
+
+        # Fallback: raw query (works on SQLite and PostgreSQL)
+        return self._get_category_breakdown_raw(target_year, target_month)
+
+    def _try_materialized_view_categories(self, year: int, month: int) -> Optional[Dict]:
+        """
+        Try to get category breakdown from materialized view.
+
+        Returns None if MV doesn't exist (SQLite or not migrated yet).
+        """
+        try:
+            # Build the month start date
+            month_start = f"{year}-{month:02d}-01"
+
+            result = self.db.execute(text("""
+                SELECT category, transaction_count, total_spent
+                FROM mv_monthly_spending
+                WHERE user_id = :user_id
+                  AND month = date_trunc('month', :month_start::date)
+                ORDER BY total_spent DESC
+            """), {"user_id": self.user_id, "month_start": month_start})
+
+            rows = result.fetchall()
+
+            if not rows:
+                return None  # MV might be empty or user has no data
+
+            total = sum(row.total_spent for row in rows)
+
+            categories = []
+            for row in rows:
+                if not row.category:
+                    continue
+
+                percentage = (row.total_spent / total * 100) if total > 0 else 0
+
+                categories.append({
+                    'category': row.category,
+                    'amount': float(row.total_spent),
+                    'count': row.transaction_count,
+                    'percentage': percentage,
+                    'emoji': self._get_category_emoji(row.category),
+                    'source': 'materialized_view'
+                })
+
+            return {
+                'total': float(total),
+                'categories': categories,
+                'source': 'materialized_view'
+            }
+
+        except Exception:
+            # MV doesn't exist or query failed — rollback to clear the failed
+            # transaction state, then fall back to raw query
+            self.db.rollback()
+            return None
+
+    def _get_category_breakdown_raw(self, year: int, month: int) -> Dict:
+        """
+        Get category breakdown using raw SQL query (fallback method).
+        """
         # Get total and by category (join with Account and Institution to filter by user)
         results = self.db.query(
             Transaction.enriched_category,
@@ -372,9 +438,9 @@ class DashboardService:
             Institution, Account.institution_id == Institution.id
         ).filter(
             and_(
-                extract('year', Transaction.date) == target_year,
-                extract('month', Transaction.date) == target_month,
-                Transaction.enriched_merchant.isnot(None),
+                extract('year', Transaction.date) == year,
+                extract('month', Transaction.date) == month,
+                or_(Transaction.enriched_merchant.isnot(None), Transaction.merchant_name.isnot(None)),
                 self._is_expense(),
                 self._user_filter()
             )
@@ -689,6 +755,7 @@ class DashboardService:
                 end_date = datetime(target_date.year, target_date.month + 1, 1)
 
         # Get transactions (join with Account and Institution to filter by user)
+        # Include all expense transactions, using fallback for non-enriched ones
         results = self.db.query(Transaction).join(
             Account, Transaction.account_id == Account.id
         ).join(
@@ -697,7 +764,7 @@ class DashboardService:
             and_(
                 Transaction.date >= start_date,
                 Transaction.date < end_date,
-                Transaction.enriched_merchant.isnot(None),
+                self._is_expense(),
                 self._user_filter()
             )
         ).order_by(Transaction.date.desc()).all()
@@ -713,15 +780,19 @@ class DashboardService:
                     'transactions': []
                 }
 
+            # Use enriched_merchant if available, fallback to merchant_name
+            merchant_name = txn.enriched_merchant or txn.merchant_name or 'Unknown'
+            category = txn.enriched_category or 'uncategorized'
+
             transactions_by_day[day_key]['total'] += abs(txn.amount)
             transactions_by_day[day_key]['transactions'].append({
                 'id': txn.id,
-                'merchant': txn.enriched_merchant,
-                'category': txn.enriched_category,
+                'merchant': merchant_name,
+                'category': category,
                 'amount': abs(txn.amount),
                 'time': txn.date.strftime('%H:%M') if txn.date else None,
                 'description': txn.description,
-                'emoji': self._get_category_emoji(txn.enriched_category)
+                'emoji': self._get_category_emoji(category)
             })
 
         # Convert to list and sort
@@ -788,7 +859,7 @@ class DashboardService:
             and_(
                 Transaction.date >= month_start,
                 Transaction.date < now + timedelta(days=1),
-                Transaction.enriched_merchant.isnot(None),
+                or_(Transaction.enriched_merchant.isnot(None), Transaction.merchant_name.isnot(None)),
                 self._is_expense(),
                 self._user_filter()
             )
@@ -805,7 +876,7 @@ class DashboardService:
             and_(
                 Transaction.date >= month_start,
                 Transaction.date < now + timedelta(days=1),
-                Transaction.enriched_merchant.isnot(None),
+                or_(Transaction.enriched_merchant.isnot(None), Transaction.merchant_name.isnot(None)),
                 Transaction.enriched_category.isnot(None),
                 self._is_expense(),
                 self._user_filter()
@@ -841,7 +912,7 @@ class DashboardService:
             and_(
                 Transaction.date >= last_month_start,
                 Transaction.date < month_start,
-                Transaction.enriched_merchant.isnot(None),
+                or_(Transaction.enriched_merchant.isnot(None), Transaction.merchant_name.isnot(None)),
                 self._is_expense(),
                 self._user_filter()
             )
@@ -959,7 +1030,7 @@ class DashboardService:
         ).filter(
             and_(
                 Transaction.date >= start_date,
-                Transaction.enriched_merchant.isnot(None),
+                or_(Transaction.enriched_merchant.isnot(None), Transaction.merchant_name.isnot(None)),
                 self._is_expense(),
                 self._user_filter()
             )
@@ -1035,7 +1106,7 @@ class DashboardService:
         ).filter(
             and_(
                 Transaction.date >= start_date,
-                Transaction.enriched_merchant.isnot(None),
+                or_(Transaction.enriched_merchant.isnot(None), Transaction.merchant_name.isnot(None)),
                 self._is_expense(),
                 self._user_filter()
             )

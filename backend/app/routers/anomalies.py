@@ -6,7 +6,7 @@ Endpoints for detecting unusual transactions and managing one-time expenses.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
@@ -93,7 +93,7 @@ async def get_unusual_transactions(
     return UnusualTransactionsResponse(
         transactions=transactions,
         total_unreviewed=total_unreviewed,
-        last_scan=datetime.utcnow().isoformat()
+        last_scan=datetime.now(timezone.utc).isoformat()
     )
 
 

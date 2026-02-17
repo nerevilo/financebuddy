@@ -33,7 +33,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h1 className="text-center text-3xl font-bold tracking-tighter text-slate-900">
-            Finance Buddy
+            Ledgi
           </h1>
           <h2 className="mt-2 text-center text-xl tracking-tight text-slate-600">
             Sign in to your account
@@ -116,6 +116,17 @@ export default function LoginPage() {
             <span className="text-slate-600">Don't have an account? </span>
             <Link href="/register" className="font-medium text-slate-700 hover:text-slate-900">
               Sign up
+            </Link>
+          </div>
+
+          <div className="text-center text-xs text-slate-500">
+            By signing in, you agree to our{' '}
+            <Link href="/terms" className="underline hover:text-slate-700">
+              Terms of Service
+            </Link>
+            {' '}and{' '}
+            <Link href="/privacy" className="underline hover:text-slate-700">
+              Privacy Policy
             </Link>
           </div>
         </form>

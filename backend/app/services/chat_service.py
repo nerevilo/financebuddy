@@ -5,10 +5,9 @@ Manages conversation flow with Claude (primary) and Gemini (fallback).
 Implements tool calling for financial queries and actions.
 """
 import json
-import asyncio
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, AsyncGenerator, Any
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -46,7 +45,7 @@ class ChatService:
     - Tool execution pipeline
     """
 
-    SYSTEM_PROMPT = """You are Finance Buddy, a helpful and knowledgeable personal finance assistant. You help users understand and manage their spending, track their financial goals, and make better financial decisions.
+    SYSTEM_PROMPT = """You are Ledgi, a helpful and knowledgeable personal finance assistant. You help users understand and manage their spending, track their financial goals, and make better financial decisions.
 
 You have access to the user's financial data through tools. When users ask about their spending, transactions, or finances, USE THE TOOLS to get real data - don't make up numbers.
 
@@ -82,7 +81,8 @@ Available capabilities:
         self.claude_client = None
         if CLAUDE_AVAILABLE and self.settings.anthropic_api_key:
             self.claude_client = anthropic.Anthropic(
-                api_key=self.settings.anthropic_api_key
+                api_key=self.settings.anthropic_api_key,
+                timeout=30.0,
             )
             logger.info("Claude client initialized successfully")
         else:
@@ -127,7 +127,7 @@ Available capabilities:
             tool_calls=json.dumps(tool_calls) if tool_calls else None,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         self.db.add(message)
         self.db.commit()
@@ -187,8 +187,8 @@ Available capabilities:
         user_message: str
     ):
         """Update conversation metadata after processing."""
-        conversation.updated_at = datetime.utcnow()
-        conversation.last_message_at = datetime.utcnow()
+        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.last_message_at = datetime.now(timezone.utc)
         conversation.message_count += 2  # User + assistant messages
 
         if response.get("tool_results"):
@@ -544,8 +544,8 @@ Available capabilities:
             id=generate_uuid(),
             user_id=self.user_id,
             status="active",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         self.db.add(conversation)
         self.db.commit()

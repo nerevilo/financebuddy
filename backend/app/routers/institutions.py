@@ -12,7 +12,7 @@ from datetime import datetime
 
 from ..core.database import get_db
 from ..core.auth import get_current_user
-from ..models import Institution, Account, User
+from ..models import Institution, User
 
 router = APIRouter(prefix="/institutions", tags=["institutions"])
 
@@ -55,7 +55,7 @@ async def get_institutions(
             Institution.status == "active",
             Institution.user_id == current_user.id
         )
-    ).all()
+    ).limit(50).all()
 
     result = []
     for inst in institutions:

@@ -32,6 +32,9 @@ function DashboardContent() {
   // Chat sidebar state
   const [isChatOpen, setIsChatOpen] = useState(false);
 
+  // Mobile sidebar state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   const hasAccounts = accounts.length > 0;
 
   // Show skeleton instead of spinner when we have cached data
@@ -65,24 +68,39 @@ function DashboardContent() {
   return (
     <div className="min-h-screen bg-surface-base">
       {/* Sidebar */}
-      <InstitutionSidebar onDataChange={refresh} />
+      <InstitutionSidebar
+        onDataChange={refresh}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
 
       {/* Main Content */}
-      <div className="ml-72 flex flex-col min-h-screen">
+      <div className="lg:ml-72 flex flex-col min-h-screen">
+        {/* Mobile header bar with hamburger */}
+        <div className="lg:hidden sticky top-0 z-30 bg-surface-sidebar px-4 py-3 flex items-center justify-between">
+          <button onClick={() => setIsSidebarOpen(true)} className="p-1">
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <span className="text-white font-semibold">Ledgi</span>
+          <div className="w-6" /> {/* Spacer for centering */}
+        </div>
+
         {/* Header */}
-        <header className="bg-white/70 backdrop-blur-xl border-b border-white/20 sticky top-0 z-10 shadow-sm">
-          <div className="px-6 py-4">
-            <div className="flex items-center justify-between">
+        <header className="bg-white/70 backdrop-blur-xl border-b border-white/20 sticky top-0 lg:top-0 z-10 shadow-sm">
+          <div className="px-4 sm:px-6 py-3 sm:py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
               {/* Left: Title + Date */}
               <div>
-                <h1 className="text-2xl font-bold tracking-tighter text-slate-900">Finance Buddy</h1>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tighter text-slate-900">Ledgi</h1>
                 <p className="text-sm text-slate-500">
                   {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                 </p>
               </div>
 
               {/* Right: Net Worth + User */}
-              <div className="flex items-center gap-6">
+              <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6">
                 {balanceSummary ? (
                   <div className="text-right">
                     <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Net Worth</p>
@@ -100,7 +118,7 @@ function DashboardContent() {
                 ) : null}
 
                 {/* User menu */}
-                <div className="flex items-center gap-3 pl-6 border-l border-slate-200">
+                <div className="flex items-center gap-3 sm:pl-6 sm:border-l border-slate-200">
                   {/* Settings link */}
                   <a
                     href="/settings"
@@ -133,7 +151,7 @@ function DashboardContent() {
         </header>
 
         {/* Main Area */}
-        <main className="flex-1 overflow-y-auto px-6 py-8">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-8">
           {showSkeleton ? (
             <DashboardSkeleton />
           ) : error && !hasAccounts ? (
@@ -155,7 +173,7 @@ function DashboardContent() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
-                <h2 className="text-3xl font-bold tracking-tight text-slate-900 mb-3">Welcome to Finance Buddy!</h2>
+                <h2 className="text-3xl font-bold tracking-tight text-slate-900 mb-3">Welcome to Ledgi!</h2>
                 <p className="text-lg text-slate-600 max-w-md mx-auto">
                   Your AI-powered personal finance assistant. Let&apos;s get started by connecting your first bank account.
                 </p>
@@ -189,20 +207,22 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {/* Sandbox Info */}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <div className="flex gap-3">
-                  <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <div>
-                    <p className="font-medium text-amber-800">Testing Mode</p>
-                    <p className="text-sm text-amber-700">
-                      This app is in sandbox mode. When connecting a bank, use username <code className="bg-amber-100 px-1 rounded">username</code> and password <code className="bg-amber-100 px-1 rounded">password</code> to test with sample data.
-                    </p>
+              {/* Sandbox Info — only shown in sandbox/development mode */}
+              {process.env.NEXT_PUBLIC_TELLER_ENV === 'sandbox' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                  <div className="flex gap-3">
+                    <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <p className="font-medium text-amber-800">Testing Mode</p>
+                      <p className="text-sm text-amber-700">
+                        This app is in sandbox mode. When connecting a bank, use username <code className="bg-amber-100 px-1 rounded">username</code> and password <code className="bg-amber-100 px-1 rounded">password</code> to test with sample data.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           ) : (
             /* Dashboard Content */
@@ -317,7 +337,7 @@ function DashboardContent() {
             d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
           />
         </svg>
-        <span className="text-sm font-medium">Ask Finance Buddy</span>
+        <span className="text-sm font-medium">Ask Ledgi</span>
       </button>
     </div>
   );

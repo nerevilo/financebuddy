@@ -4,8 +4,9 @@ Authentication Router
 Handles user registration, login, token refresh, password reset, and current user info.
 Rate limiting is applied to protect against brute force attacks.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
@@ -15,6 +16,7 @@ from ..core.security import (
     create_password_reset_token, verify_password_reset_token
 )
 from ..core.auth import get_current_user
+from ..core.config import get_settings
 from ..core.rate_limiter import (
     limiter,
     REGISTER_RATE_LIMIT,
@@ -32,6 +34,30 @@ from ..schemas import (
 from ..services.email_service import EmailService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _set_auth_cookies(response: JSONResponse, access_token: str, refresh_token: str) -> None:
+    """Set httpOnly cookies for access and refresh tokens."""
+    settings = get_settings()
+    is_prod = not settings.debug
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        max_age=30 * 60,  # 30 minutes
+        path="/",
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=is_prod,
+        samesite="lax",
+        max_age=7 * 24 * 60 * 60,  # 7 days
+        path="/api/auth",  # only sent to auth endpoints
+    )
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -67,11 +93,14 @@ async def register(request: Request, user_data: UserRegister, db: Session = Depe
     access_token = create_access_token(data={"sub": user.id, "email": user.email})
     refresh_token = create_refresh_token(data={"sub": user.id, "email": user.email})
 
-    return TokenResponse(
+    body = TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         user=UserResponse.model_validate(user)
     )
+    response = JSONResponse(content=body.model_dump(mode="json"))
+    _set_auth_cookies(response, access_token, refresh_token)
+    return response
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -116,21 +145,30 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
     access_token = create_access_token(data={"sub": user.id, "email": user.email})
     refresh_token = create_refresh_token(data={"sub": user.id, "email": user.email})
 
-    return TokenResponse(
+    body = TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         user=UserResponse.model_validate(user)
     )
+    response = JSONResponse(content=body.model_dump(mode="json"))
+    _set_auth_cookies(response, access_token, refresh_token)
+    return response
 
 
 @router.post("/refresh", response_model=TokenResponse)
 @limiter.limit(REFRESH_RATE_LIMIT)
-async def refresh_token(request: Request, token_data: TokenRefresh, db: Session = Depends(get_db)):
+async def refresh_token(request: Request, token_data: TokenRefresh = None, db: Session = Depends(get_db)):
     """
     Refresh access token using refresh token.
+
+    Reads refresh token from request body OR httpOnly cookie.
     Rate limited to 20 requests per minute per IP.
     """
-    token_info = decode_token(token_data.refresh_token)
+    # Try body first, then cookie
+    raw_token = (token_data.refresh_token if token_data and token_data.refresh_token else None) or request.cookies.get("refresh_token")
+    if not raw_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token required")
+    token_info = decode_token(raw_token)
 
     if not token_info or not token_info.user_id:
         raise HTTPException(
@@ -156,11 +194,23 @@ async def refresh_token(request: Request, token_data: TokenRefresh, db: Session 
     access_token = create_access_token(data={"sub": user.id, "email": user.email})
     new_refresh_token = create_refresh_token(data={"sub": user.id, "email": user.email})
 
-    return TokenResponse(
+    body = TokenResponse(
         access_token=access_token,
         refresh_token=new_refresh_token,
         user=UserResponse.model_validate(user)
     )
+    response = JSONResponse(content=body.model_dump(mode="json"))
+    _set_auth_cookies(response, access_token, new_refresh_token)
+    return response
+
+
+@router.post("/logout")
+async def logout():
+    """Clear auth cookies."""
+    response = JSONResponse(content={"message": "Logged out"})
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/api/auth")
+    return response
 
 
 @router.get("/me", response_model=UserResponse)
@@ -230,7 +280,7 @@ async def reset_password(
 
     # Update password
     user.hashed_password = get_password_hash(body.new_password)
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     db.commit()
 
     return PasswordResetResponse(message="Password has been reset successfully")

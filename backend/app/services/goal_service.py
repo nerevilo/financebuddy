@@ -3,7 +3,7 @@ Goal Management Service
 
 CRUD operations and auto-suggestion for financial goals.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
@@ -101,9 +101,9 @@ class GoalService:
         # Check if completed
         if goal.current_amount >= goal.target_amount and goal.status == 'active':
             goal.status = 'completed'
-            goal.completed_at = datetime.utcnow()
+            goal.completed_at = datetime.now(timezone.utc)
 
-        goal.updated_at = datetime.utcnow()
+        goal.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         return goal
 
@@ -125,9 +125,9 @@ class GoalService:
         goal.current_amount += amount
         if goal.current_amount >= goal.target_amount:
             goal.status = 'completed'
-            goal.completed_at = datetime.utcnow()
+            goal.completed_at = datetime.now(timezone.utc)
 
-        goal.updated_at = datetime.utcnow()
+        goal.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         return goal
 

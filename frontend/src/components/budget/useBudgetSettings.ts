@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BudgetSettings } from './BudgetSettingModal';
 
-const STORAGE_KEY = 'financebuddy_budget_settings';
+const STORAGE_KEY = 'ledgi_budget_settings';
 
 export function useBudgetSettings() {
   const [settings, setSettings] = useState<BudgetSettings | null>(null);
