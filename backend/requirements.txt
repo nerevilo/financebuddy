@@ -9,11 +9,11 @@ alembic>=1.13.1
 psycopg2-binary>=2.9.0  # PostgreSQL driver
 
 # HTTP client for Teller API
-httpx==0.26.0
+httpx>=0.27.0
 
 # Environment and config
-python-dotenv==1.0.0
-pydantic-settings==2.1.0
+python-dotenv>=1.0.0
+pydantic-settings>=2.1.0
 email-validator>=2.1.0  # Required for pydantic EmailStr
 
 # Security
@@ -46,4 +46,3 @@ redis>=5.0.0  # Redis client with async support
 
 # Testing
 pytest>=8.0.0
-httpx>=0.27.0  # Required by TestClient

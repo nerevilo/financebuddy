@@ -98,7 +98,8 @@ def validate_api_key(key: str, db: Session) -> Optional[Tuple[User, APIKey]]:
         return None
 
     # Check expiration
-    if api_key.expires_at and api_key.expires_at < datetime.now(timezone.utc):
+    expires_at = api_key.expires_at.replace(tzinfo=timezone.utc) if api_key.expires_at and api_key.expires_at.tzinfo is None else api_key.expires_at
+    if expires_at and expires_at < datetime.now(timezone.utc):
         return None
 
     # Get the user

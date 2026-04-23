@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FinanceBuddy · Link Bank</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; color: #111; }
+  button { font-size: 16px; padding: 10px 20px; cursor: pointer; border: 1px solid #111; background: #fff; border-radius: 6px; }
+  button:hover { background: #111; color: #fff; }
+  button:disabled { opacity: .5; cursor: wait; }
+  label { display: block; margin: 16px 0 4px; font-weight: 600; font-size: 13px; }
+  input, select { padding: 8px; font-size: 14px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+  #status { margin-top: 20px; padding: 12px; border-radius: 6px; font-size: 14px; display: none; }
+  .ok { background: #e6f7ec; color: #13653c; border: 1px solid #b8e0c8; }
+  .err { background: #fdecec; color: #8c1f1f; border: 1px solid #f0bcbc; }
+  h3 { margin-top: 32px; }
+  .inst { padding: 8px 12px; background: #f4f4f4; border-radius: 4px; margin: 4px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Link a bank to FinanceBuddy</h1>
+<p>Connect each bank once. Tokens save directly into the local SQLite DB — no copy-paste.</p>
+
+<label>Teller App ID</label>
+<input id="app_id" value="app_pn55bmnf8k4papve7o000">
+
+<label>Environment</label>
+<select id="env">
+  <option value="sandbox">sandbox (test data)</option>
+  <option value="development" selected>development (your real accounts)</option>
+  <option value="production">production</option>
+</select>
+
+<p><button id="go">Connect a bank</button></p>
+
+<div id="status"></div>
+
+<h3>Linked banks</h3>
+<div id="linked">loading…</div>
+
+<script src="https://cdn.teller.io/connect/connect.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const setStatus = (msg, cls) => {
+  const el = $('status');
+  el.textContent = msg;
+  el.className = cls;
+  el.style.display = 'block';
+};
+
+async function refreshLinked() {
+  try {
+    const r = await fetch('/institutions');
+    const rows = await r.json();
+    $('linked').innerHTML = rows.length
+      ? rows.map(r => `<div class="inst"><b>${r.name}</b> — last synced: ${r.last_synced_at || 'never'}</div>`).join('')
+      : '<i>None yet.</i>';
+  } catch (e) {
+    $('linked').textContent = 'Failed to load: ' + e.message;
+  }
+}
+refreshLinked();
+
+$('go').addEventListener('click', () => {
+  const appId = $('app_id').value.trim();
+  const env = $('env').value;
+  if (!appId) { alert('App ID required'); return; }
+
+  const tc = TellerConnect.setup({
+    applicationId: appId,
+    environment: env,
+    products: ['transactions', 'balance'],
+    onSuccess: async (enrollment) => {
+      const token = enrollment.accessToken;
+      const instId = enrollment.enrollment.id;
+      const instName = enrollment.enrollment.institution?.name || 'unknown';
+      try {
+        const r = await fetch('/link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: instId, name: instName, token })
+        });
+        const j = await r.json();
+        if (j.ok) {
+          setStatus(`Linked ${instName}. Run sync_now in Claude Code (or link another bank).`, 'ok');
+          refreshLinked();
+        } else {
+          setStatus('Save failed: ' + (j.error || 'unknown'), 'err');
+        }
+      } catch (e) {
+        setStatus('Save failed: ' + e.message, 'err');
+      }
+    },
+    onExit: () => console.log('user exited'),
+    onFailure: (e) => setStatus('Connect failed: ' + JSON.stringify(e), 'err'),
+  });
+  tc.open();
+});
+</script>
+
+</body>
+</html>

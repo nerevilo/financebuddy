@@ -1,139 +1,116 @@
-# CLAUDE.md — Project Guidelines for FinanceBuddy
+# CLAUDE.md — FinanceBuddy
 
-## Project Overview
+## What this is
 
-FinanceBuddy is a personal finance app (Next.js + FastAPI + PostgreSQL) that connects to bank accounts via Teller, uses AI to categorize transactions, and provides a conversational chat API. It handles sensitive financial data — every code change must reflect that.
+A **local, single-user** personal finance tool. Pulls real bank data from Teller.io and exposes it to Claude Code via an MCP server so you can ask questions like "can I afford X?" or "how much did I spend on Y?" in conversation.
+
+**No web UI, no hosted backend, no auth, no cloud DB.** Just:
+- `fb/` — Python package (~5 files)
+- `financebuddy.db` — SQLite at project root
+- Teller mTLS certs at `backend/certificate.pem` + `backend/private_key.pem`
+- `financebuddy` MCP server registered at user scope in `~/.claude.json`
 
 ## Architecture
 
-- **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0, Alembic, PostgreSQL (Supabase)
-- **Frontend:** Next.js 14 (App Router), React 18, Tailwind CSS, Tremor, Radix UI, SWR
-- **AI/ML:** Gemini Flash (primary enrichment), Claude (chat), FastEmbed (semantic matching), Tavily (search)
-- **Banking:** Teller.io API with mTLS certificate auth
-- **Caching:** Redis (optional), in-memory LRU fallback
-- **Deploy:** Railway (backend), Vercel (frontend)
+```
+fb/
+  db.py             SQLite schema + connection helpers
+  teller.py         Teller API client (mTLS, synchronous httpx)
+  sync.py           CLI: Teller → SQLite upsert (accounts, balances, transactions)
+  link_bank.py      CLI: save one enrollment to SQLite
+  connect.html      Teller Connect browser page
+  connect_server.py Localhost HTTP server (port 8787) that serves connect.html
+                    and receives enrollment POSTs — needed because Teller Connect
+                    refuses file:// origins
+  mcp_server.py     fastmcp stdio server — the surface Claude Code talks to
 
-## Key Directories
+financebuddy.db     SQLite, 3 tables: institutions, accounts, transactions
+backend/            LEGACY — old FastAPI + SaaS code, dormant, untouched
+frontend/           LEGACY — old Next.js UI, dormant, untouched
+```
 
-- `backend/app/routers/` — API endpoints
-- `backend/app/services/` — Business logic (enrichment, chat, dashboard)
-- `backend/app/core/` — Config, database, auth, caching
-- `backend/app/models/` — SQLAlchemy models
-- `backend/alembic/versions/` — Database migrations
-- `frontend/src/app/` — Next.js pages (App Router)
-- `frontend/src/components/` — React components
-- `frontend/src/lib/` — API client, auth, hooks, utilities
+The `backend/` venv (`backend/venv/`) is what `fb/` runs under — it already has `httpx`, `fastmcp`, `sqlalchemy`, etc. Don't create a new venv.
 
-## Security Rules (Non-Negotiable)
+## How to use from Claude Code
 
-### Secrets
-- NEVER hardcode API keys, tokens, passwords, or connection strings in source code
-- NEVER commit `.env` files — they are in `.gitignore` for a reason
-- NEVER log secrets, tokens, or full database URLs — redact before logging
-- NEVER expose internal config in API responses (no app IDs, env names, or API key names in error messages)
-- Use environment variables for ALL secrets, loaded via `pydantic-settings`
+MCP server name: **`financebuddy`** (stdio, user scope). Tools exposed:
 
-### Authentication & Data Isolation
-- EVERY database query that returns user data MUST filter by user_id — no exceptions
-- NEVER trust user_id from request parameters alone for sensitive operations — verify against the authenticated user
-- Background tasks and services MUST receive and enforce user_id scoping
-- When creating `DashboardService` or similar scoped services, ALWAYS pass `user_id`
-- API key scope enforcement: check `api_key.scopes` before allowing access to endpoints
-- NEVER store auth tokens in localStorage — use httpOnly cookies
+| Tool | What it does |
+|---|---|
+| `list_institutions` | Linked banks + last-synced time |
+| `list_accounts` | All accounts with current + available balances |
+| `get_balances` | Totals: assets, debt, net |
+| `list_transactions` | Filter by date / account / merchant / amount |
+| `spending_by_category` | Teller categories grouped, defaults to last 30 days |
+| `top_merchants` | Highest spend by merchant |
+| `month_summary` | Income / spend / net / tx count for a calendar month |
+| `search` | LIKE on description + merchant |
+| `sync_now` | Pull fresh data from Teller (all institutions, or one) |
 
-### Input Handling
-- NEVER embed user-provided text directly into LLM prompts without sanitization
-- Wrap untrusted content (transaction descriptions, user notes) in clear delimiters when used in prompts
-- Validate ALL request inputs: string lengths, numeric bounds (`ge=`, `le=`), date formats
-- Escape LIKE wildcards in search inputs (`%`, `_`)
-- Validate regex patterns from users before compiling (wrap in try/except for `re.error`)
+**Amount convention (Teller):** negative = money out (spend), positive = money in (income/refund). The MCP tools return raw Teller amounts — flip the sign when reporting spend to the user.
 
-### CORS
-- NEVER use `allow_origins=["*"]` with `allow_credentials=True`
-- Keep CORS origin allowlists explicit — no broad regex patterns
-- Anchor any regex patterns: `^https://exact-pattern\.example\.com$`
+Defaults to last 30 days when date range is omitted. Always confirm whether "last month" means calendar month (`month_summary`) or trailing 30 days.
 
-## Database Rules
+## How to add a bank
 
-### Queries
-- ALWAYS use `joinedload()` or `selectinload()` when accessing relationships in loops — no N+1 queries
-- NEVER use `.all()` on unbounded queries — always add `.limit()` or process in batches
-- Use `SELECT ... FOR UPDATE SKIP LOCKED` when processing shared queues (enrichment batches)
-- Batch database writes: use `db.add_all()` + single `db.commit()` instead of committing in loops
-- NEVER use `Base.metadata.create_all()` — use Alembic migrations exclusively
+```bash
+cd /Users/jialanren/projects/financebuddy
+./backend/venv/bin/python -m fb.connect_server
+```
 
-### Migrations
-- ALL schema changes go through Alembic — create a migration with `alembic revision --autogenerate -m "description"`
-- Test both `upgrade()` and `downgrade()` paths
-- Never modify a migration that has been applied to production
+This starts a tiny server on `http://localhost:8787/` and opens the browser. User clicks **Connect**, completes Teller Connect, token saves directly to SQLite. Kill the server (Ctrl-C or `kill <pid>`) when done.
 
-### Indexes
-- Add indexes for columns that appear in `WHERE` clauses of frequent queries
-- Use composite indexes for queries that filter on multiple columns together
-- Verify with `EXPLAIN ANALYZE` before and after adding indexes
+Environments: `sandbox` (fake data, `username`/`password`), `development` (real accounts, limited institutions), `production` (requires Teller approval). App ID `app_pn55bmnf8k4papve7o000` is currently wired for development.
 
-## API Design Rules
+## How to sync
 
-- Return proper HTTP status codes: 400 for bad input, 401 for auth failure, 403 for forbidden, 404 for not found, 409 for conflicts
-- NEVER return 200 for error conditions — use appropriate error codes
-- Use consistent error response format: `{"detail": "Human-readable message"}`
-- NEVER expose internal details in error messages (no stack traces, config names, or file paths)
-- Add rate limiting to expensive endpoints (enrichment triggers, LLM calls, background tasks)
-- Validate pagination parameters: `limit` needs both `ge=1` and `le=<max>`, `offset` needs `ge=0`
-- Add `max_length` to all string input fields (chat messages, notes, tag names, merchant names)
+From the terminal:
+```bash
+./backend/venv/bin/python -m fb.sync             # all institutions
+./backend/venv/bin/python -m fb.sync --institution <enr_...>
+```
 
-## External API Integration Rules
+Or via MCP: ask and Claude calls `sync_now`. Teller returns ~90 days of history per call, so a full reseed after a gap pulls a bounded window — you keep earlier data because sync is upsert-only.
 
-- ALWAYS set explicit timeouts on HTTP clients: `httpx.AsyncClient(timeout=30.0)`
-- Add retry logic with exponential backoff for transient failures (429, 500, 502, 503, network errors)
-- Reuse HTTP client instances — create once in `__init__`, don't create per-request
-- NEVER block the async event loop with synchronous calls — use `asyncio.to_thread()` for CPU-bound work
-- Log external API failures with context (service name, endpoint, status code, latency)
-- Track actual API costs, not hardcoded estimates
+## Data model (SQLite)
 
-## Frontend Rules
+```sql
+institutions(id, name, access_token, enrollment_id, created_at, last_synced_at)
+accounts(id, institution_id, name, type, subtype, currency, last_four,
+         current_balance, available_balance, balance_updated_at)
+transactions(id, account_id, date, amount, description, merchant, category,
+             status, raw_json)
+```
 
-- NEVER store auth tokens or sensitive data in localStorage or sessionStorage
-- Add Subresource Integrity (SRI) hashes to all externally loaded scripts
-- Validate environment variables at build time — fail the build if required vars are missing
-- Use proper TypeScript types for API responses — no `any` for data structures
-- Wrap page-level components in React error boundaries
-- Use Next.js router for navigation — no `window.location.href` redirects
-- Deduplicate token refresh logic — only one refresh request should be in-flight at a time
+`raw_json` is the full Teller payload — if you need a field the schema doesn't surface (e.g. `running_balance`, `details.processing_status`), parse it from there.
 
-## Code Quality
+Schema changes: edit `fb/db.py` and add a migration block. No Alembic, just idempotent `ALTER TABLE` guarded with `PRAGMA table_info`.
 
-### Python
-- Use `datetime.now(timezone.utc)` — NEVER use `datetime.utcnow()` (deprecated in 3.12, removed in 3.13)
-- Type-hint all function signatures
-- Use specific exception types — no bare `except:` or `except Exception:` without logging
-- Log errors with context before returning None/fallback values
-- Keep functions under 50 lines — extract helpers for complex logic
+## Gotchas
 
-### TypeScript
-- Define interfaces for all API response shapes
-- No `any` types for data structures — use `unknown` with type guards if the shape is truly unknown
-- Handle loading, error, and empty states for all data-fetching components
+- **Access tokens are plaintext in SQLite.** Local-only, single user, low blast radius — but don't check `financebuddy.db` into git.
+- **Teller Connect refuses `file://` origins.** Always serve `connect.html` via `connect_server.py`, not `open`.
+- **The MCP server caches nothing.** Every tool call hits SQLite directly. That's fine at 1k tx.
+- **Sync is blocking/synchronous.** A full sync with ~6 accounts takes a few seconds. Teller does rate-limit — if you see 429s, back off.
+- **Transactions that later settle change ID sometimes.** Sync is upsert on the current ID, so a pending→posted transition may create a new row. Acceptable; dedupe at query time if it matters.
+- **Don't touch `backend/` or `frontend/`** unless you're explicitly reviving the SaaS. They still reference Supabase (currently paused) and will error on startup.
 
-## Git & Deployment
+## Reconfiguring the MCP server
 
-- NEVER commit `.env`, `.pem`, or credential files
-- Pin dependency versions in production — use lockfiles (`pip-compile`, `package-lock.json`)
-- Run `alembic upgrade head` as part of deploy, before starting the server
-- All schema changes go through Alembic, never through `create_all()`
+```bash
+claude mcp list                                      # see registered servers
+claude mcp get financebuddy                          # status
+claude mcp remove financebuddy -s user               # unregister
+claude mcp add -s user -e "PYTHONPATH=/Users/jialanren/projects/financebuddy" \
+  -- financebuddy /Users/jialanren/projects/financebuddy/backend/venv/bin/python \
+  -m fb.mcp_server                                   # re-register
+```
 
-## Testing (To Be Built)
+`PYTHONPATH` is required so Python can import `fb` without a cwd.
 
-- Write integration tests for auth flows and data isolation before shipping new features
-- Test that user A cannot access user B's data through any endpoint
-- Mock external APIs (Gemini, Teller, Ntropy) in tests — never call real APIs
-- Run tests in CI before merge — no untested code reaches production
+## Typical user questions and how to answer them
 
-## Known Technical Debt
-
-See `docs/CODE_REVIEW.md` for the full audit. Key items to resolve:
-- Teller tokens stored unencrypted (models.py:84)
-- Enrichment tasks lack user scoping (categorization.py:50-62)
-- No automated tests or CI pipeline
-- Auth tokens in localStorage instead of httpOnly cookies
-- 49 instances of deprecated `datetime.utcnow()`
+- **"Can I afford a $X purchase?"** → `get_balances` + `month_summary` for current month + `list_transactions` filtered to recurring/upcoming fixed costs. Reason about post-purchase cash position vs. known outflows through month-end.
+- **"What am I spending on subscriptions?"** → `list_transactions` with recent date range, group by merchant, flag the ones that recur monthly at similar amounts. (There's no `recurring` table anymore — infer it.)
+- **"Keep me under $X this month"** → `month_summary` now + pace vs. days remaining. Proactively flag if MTD spend × (30/day_of_month) > target.
+- **"What's new since last sync?"** → call `sync_now` first; it returns counts. Then `list_transactions` sorted DESC.

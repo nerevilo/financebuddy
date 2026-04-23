@@ -9,7 +9,7 @@ from typing import Optional
 import json
 
 from ..core.database import get_db
-from ..core.auth import get_current_user
+from ..core.auth import get_current_user_flexible as get_current_user
 from ..core.rate_limiter import limiter
 from ..models import User
 from ..schemas.chat_schemas import (

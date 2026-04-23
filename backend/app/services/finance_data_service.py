@@ -172,6 +172,7 @@ class FinanceDataService:
                 "is_one_time": tx.is_one_time,
                 "categorization_source": tx.categorization_source,
                 "categorization_confidence": tx.categorization_confidence,
+                "account_id": tx.account_id,
             })
 
         return {

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
 from ..core.database import get_db, SessionLocal
-from ..core.auth import get_current_user
+from ..core.auth import get_current_user_flexible as get_current_user
 from ..core.encryption import encrypt_value, decrypt_value
 from ..core.logging_config import get_logger
 from ..models import Institution, Account, Transaction, User

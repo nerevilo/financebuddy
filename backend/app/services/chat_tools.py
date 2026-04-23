@@ -149,6 +149,15 @@ TOOL_DEFINITIONS = [
         }
     },
     {
+        "name": "get_accounts",
+        "description": "Get user's bank account balances and details. Use when user asks about account balances, net worth, or how much money they have.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "compare_periods",
         "description": "Compare spending between two time periods. Use when user asks 'how does this month compare to last month?' or similar comparisons.",
         "input_schema": {
@@ -236,6 +245,7 @@ class ChatToolExecutor:
             "get_goals": self._get_goals,
             "update_transaction_tags": self._update_transaction_tags,
             "get_unusual_transactions": self._get_unusual_transactions,
+            "get_accounts": self._get_accounts,
             "compare_periods": self._compare_periods,
         }
 
@@ -581,6 +591,43 @@ class ChatToolExecutor:
                 }
                 for t in transactions
             ]
+        }
+
+    async def _get_accounts(self) -> Dict:
+        """Get all accounts with balances."""
+        accounts = self.db.query(Account).join(
+            Institution, Account.institution_id == Institution.id
+        ).filter(self._user_filter()).all()
+
+        total_assets = 0
+        total_liabilities = 0
+        account_list = []
+
+        for a in accounts:
+            balance = a.current_balance or 0
+            institution_name = a.institution.name if a.institution else "Unknown"
+
+            if a.type == "credit":
+                total_liabilities += abs(balance)
+            else:
+                total_assets += balance
+
+            account_list.append({
+                "name": a.name,
+                "institution": institution_name,
+                "type": a.type,
+                "subtype": a.subtype,
+                "current_balance": balance,
+                "available_balance": a.available_balance,
+                "last_synced": a.last_synced_at.isoformat() if a.last_synced_at else None,
+            })
+
+        return {
+            "count": len(account_list),
+            "accounts": account_list,
+            "total_assets": total_assets,
+            "total_liabilities": total_liabilities,
+            "net_worth": total_assets - total_liabilities,
         }
 
     async def _compare_periods(
