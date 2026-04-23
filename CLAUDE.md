@@ -46,8 +46,18 @@ MCP server name: **`financebuddy`** (stdio, user scope). Tools exposed:
 | `month_summary` | Income / spend / net / tx count for a calendar month |
 | `search` | LIKE on description + merchant |
 | `sync_now` | Pull fresh data from Teller (all institutions, or one) |
+| `annotate_transaction` | Note / exclude / tag / mark-transfer one transaction |
+| `classify_merchant` | Persist a merchant → taxonomy label (`income:salary`, `fixed:rent`, `variable:dining`, etc.) |
+| `list_classifications` | View current merchant classifications |
+| `auto_enrich` | Run heuristics (cadence + keyword) to bulk-classify merchants |
+| `get_unclassified_merchants` | Merchants with meaningful spend that still need a label (for the LLM to fill in) |
+| `healthcheck` | Structured Income / Fixed / Variable / Savings view using classifications |
 
-**Amount convention (Teller):** negative = money out (spend), positive = money in (income/refund). The MCP tools return raw Teller amounts — flip the sign when reporting spend to the user.
+**Amount convention (Teller, account-centric):**
+- **Depository** (checking/savings): negative = outflow, positive = inflow. Standard.
+- **Credit cards**: **positive = purchase** (charge to card), negative = payment/refund. Opposite sign!
+
+The old `list_transactions` / `month_summary` / `top_merchants` / `spending_by_category` tools return **raw** Teller amounts. Filtering on `amount < 0` on a credit card MISSES purchases. The newer `healthcheck` / `auto_enrich` / `classify.FLOW_EXPR` normalize this internally to cash-flow convention (positive = inflow, negative = outflow regardless of account). When writing new queries that reason about direction across accounts, use the `(CASE WHEN a.type IN ('credit','loan') THEN -t.amount ELSE t.amount END)` flow expression.
 
 Defaults to last 30 days when date range is omitted. Always confirm whether "last month" means calendar month (`month_summary`) or trailing 30 days.
 
@@ -79,8 +89,19 @@ institutions(id, name, access_token, enrollment_id, created_at, last_synced_at)
 accounts(id, institution_id, name, type, subtype, currency, last_four,
          current_balance, available_balance, balance_updated_at)
 transactions(id, account_id, date, amount, description, merchant, category,
-             status, raw_json)
+             status, raw_json,
+             note, excluded, tags, is_transfer)
+merchant_classifications(merchant PRIMARY KEY, classification, confidence,
+                         source, notes, created_at, updated_at)
 ```
+
+`merchant_classifications` holds per-merchant taxonomy labels used by `healthcheck`. Taxonomy is fixed (see `fb.classify.TAXONOMY`):
+- `income:{salary,refund,other}`
+- `fixed:{rent,utility,subscription,membership,insurance,loan,other}`
+- `variable:{groceries,dining,transport,shopping,health,entertainment,travel,personal,fees,other}`
+- `transfer`
+
+`source` is `user` (explicit confirmation — never overwritten by automation), `heuristic` (cadence/keyword detected), or `llm` (Claude classified from world knowledge).
 
 `raw_json` is the full Teller payload — if you need a field the schema doesn't surface (e.g. `running_balance`, `details.processing_status`), parse it from there.
 

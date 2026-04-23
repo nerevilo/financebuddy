@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastmcp import FastMCP
 
-from . import db, sync as sync_mod
+from . import classify, db, sync as sync_mod
 
 mcp = FastMCP("financebuddy")
 
@@ -252,6 +252,85 @@ def month_summary(year: int, month: int) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Merchant classification
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def classify_merchant(
+    merchant: str,
+    classification: str,
+    source: str = "user",
+    notes: Optional[str] = None,
+) -> dict:
+    """Persist a classification for a merchant.
+
+    `classification` must be one of the fixed taxonomy values:
+      income:{salary,refund,other}
+      fixed:{rent,utility,subscription,membership,insurance,loan,other}
+      variable:{groceries,dining,transport,shopping,health,entertainment,travel,personal,fees,other}
+      transfer
+
+    `source` is 'user' (explicit confirmation), 'llm' (classified by Claude
+    from world knowledge), or 'heuristic' (cadence/keyword detected).
+    User-source entries are never overwritten by automated re-enrichment.
+
+    Returns the stored row + an 'action' field: inserted|updated|skipped_user_override.
+    """
+    with db.cursor() as conn:
+        action = classify.upsert(
+            conn, merchant=merchant, classification=classification,
+            source=source, notes=notes,
+        )
+        row = classify.get_classification(conn, merchant) or {}
+    return {"action": action, **row}
+
+
+@mcp.tool()
+def list_classifications(classification: Optional[str] = None) -> list[dict]:
+    """All merchant classifications, optionally filtered by classification string."""
+    with db.cursor() as conn:
+        if classification:
+            rows = conn.execute(
+                "SELECT merchant, classification, confidence, source, notes, created_at, updated_at "
+                "FROM merchant_classifications WHERE classification = ? ORDER BY merchant",
+                (classification,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT merchant, classification, confidence, source, notes, created_at, updated_at "
+                "FROM merchant_classifications ORDER BY classification, merchant"
+            ).fetchall()
+    return _rows(rows)
+
+
+@mcp.tool()
+def auto_enrich(lookback_days: int = 180) -> dict:
+    """Run heuristic merchant classification: salary cadence, stable subscriptions,
+    keyword-matched categories. Never overwrites user-confirmed entries.
+
+    Also returns `rent_candidates` — merchants that look like rent (large,
+    monthly, stable, from depository) that the caller should ask the user
+    to confirm, since rent often goes to a person's name.
+    """
+    with db.cursor() as conn:
+        return classify.auto_enrich(conn, lookback_days=lookback_days)
+
+
+@mcp.tool()
+def get_unclassified_merchants(
+    min_spend: float = 20.0, days: int = 90, limit: int = 30
+) -> list[dict]:
+    """Merchants with spend ≥min_spend in the trailing `days` window that have
+    no classification. Intended for the LLM to classify using world knowledge.
+    """
+    with db.cursor() as conn:
+        return classify.unclassified_merchants(
+            conn, min_spend=min_spend, days=days, limit=limit
+        )
+
+
 # Transactions that look like internal transfers even when is_transfer isn't set:
 # credit-card payments (AUTOPAY, ONLINE PAYMENT, etc.) and merchants that are
 # bank/card issuer names. Mirrors the heuristics in the fb-transfers skill so
@@ -283,26 +362,27 @@ _HC_TRANSFERISH = """
 
 
 def _hc_subscriptions(conn, lookback_start: str, today: str, current_start: str) -> list[dict]:
-    # Recurring charges: a merchant seen in ≥3 distinct calendar months. We no
-    # longer require tight amount spread — variable subscriptions (overage
-    # billing, annual-vs-monthly plans) are still useful to surface. The
-    # `amount_stable` flag distinguishes fixed-price subs from variable ones.
+    # Recurring charges: a merchant seen in ≥3 distinct calendar months. Uses
+    # normalized flow so credit-card charges (positive in Teller) are treated
+    # as outflows consistently with depository.
+    FLOW = classify.FLOW_EXPR
     rows = conn.execute(
         f"""
-        SELECT merchant,
+        SELECT t.merchant,
                COUNT(*) AS tx_count,
-               COUNT(DISTINCT strftime('%Y-%m', date)) AS months_seen,
-               AVG(-amount) AS avg_amount,
-               MIN(-amount) AS min_amount,
-               MAX(-amount) AS max_amount,
-               MIN(date) AS first_seen,
-               MAX(date) AS last_seen
-        FROM transactions
-        WHERE amount < 0
+               COUNT(DISTINCT strftime('%Y-%m', t.date)) AS months_seen,
+               AVG(-{FLOW}) AS avg_amount,
+               MIN(-{FLOW}) AS min_amount,
+               MAX(-{FLOW}) AS max_amount,
+               MIN(t.date) AS first_seen,
+               MAX(t.date) AS last_seen
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        WHERE {FLOW} < 0
           {_HC_TRANSFERISH}
-          AND date >= ? AND date <= ?
-          AND merchant IS NOT NULL AND merchant != ''
-        GROUP BY merchant
+          AND t.date >= ? AND t.date <= ?
+          AND t.merchant IS NOT NULL AND t.merchant != ''
+        GROUP BY t.merchant
         HAVING months_seen >= 3
            AND avg_amount >= 5
            AND tx_count >= months_seen
@@ -315,12 +395,13 @@ def _hc_subscriptions(conn, lookback_start: str, today: str, current_start: str)
     for r in rows:
         split = conn.execute(
             f"""
-            SELECT AVG(CASE WHEN date >= ? THEN -amount END) AS cur_avg,
-                   AVG(CASE WHEN date <  ? THEN -amount END) AS prior_avg
-            FROM transactions
-            WHERE merchant = ? AND amount < 0
+            SELECT AVG(CASE WHEN t.date >= ? THEN -{FLOW} END) AS cur_avg,
+                   AVG(CASE WHEN t.date <  ? THEN -{FLOW} END) AS prior_avg
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.merchant = ? AND {FLOW} < 0
               {_HC_TRANSFERISH}
-              AND date >= ? AND date <= ?
+              AND t.date >= ? AND t.date <= ?
             """,
             (current_start, current_start, r["merchant"], lookback_start, today),
         ).fetchone()
@@ -344,75 +425,41 @@ def _hc_subscriptions(conn, lookback_start: str, today: str, current_start: str)
     return out
 
 
-def _hc_category_trends(conn, prior_start: str, current_start: str, current_end: str) -> list[dict]:
-    rows = conn.execute(
-        f"""
-        SELECT COALESCE(category, 'uncategorized') AS category,
-               SUM(CASE WHEN date >= ? THEN -amount ELSE 0 END) AS cur_total,
-               SUM(CASE WHEN date <  ? THEN -amount ELSE 0 END) AS prior_total
-        FROM transactions
-        WHERE amount < 0
-          {_HC_TRANSFERISH}
-          AND date >= ? AND date <= ?
-        GROUP BY COALESCE(category, 'uncategorized')
-        """,
-        (current_start, current_start, prior_start, current_end),
-    ).fetchall()
-
-    out = []
-    for r in rows:
-        cur = round(r["cur_total"] or 0, 2)
-        prior = round(r["prior_total"] or 0, 2)
-        abs_change = round(cur - prior, 2)
-        if prior > 0:
-            pct = round((cur - prior) / prior * 100, 1)
-        elif cur > 0:
-            pct = None  # undefined — flag via "new_category" instead
-        else:
-            pct = 0.0
-        out.append({
-            "category": r["category"],
-            "current": cur,
-            "prior": prior,
-            "abs_change": abs_change,
-            "pct_change": pct,
-            "new_category": prior == 0 and cur > 0,
-        })
-    out.sort(key=lambda x: abs(x["abs_change"]), reverse=True)
-    return out
-
-
 def _hc_outliers(conn, lookback_start: str, current_start: str, current_end: str) -> list[dict]:
-    # Build the outlier query: inline the transfer-ish filter in the baseline CTE
-    # and again in the outer tx scan. Aliased for the outer `t.*` references.
-    t_filter = _HC_TRANSFERISH.replace(" is_transfer ", " t.is_transfer ") \
-                              .replace(" excluded ", " t.excluded ") \
-                              .replace("COALESCE(category", "COALESCE(t.category") \
-                              .replace("COALESCE(description", "COALESCE(t.description") \
-                              .replace("COALESCE(merchant", "COALESCE(t.merchant")
+    FLOW = classify.FLOW_EXPR
+    # In the outer query both transactions (t) and baseline (b) have a merchant
+    # column, so rewrite the shared transferish filter to qualify against t.
+    t_filter = _HC_TRANSFERISH \
+        .replace("is_transfer", "t.is_transfer") \
+        .replace(" excluded ", " t.excluded ") \
+        .replace("COALESCE(category", "COALESCE(t.category") \
+        .replace("COALESCE(description", "COALESCE(t.description") \
+        .replace("COALESCE(merchant", "COALESCE(t.merchant")
     rows = conn.execute(
         f"""
         WITH baseline AS (
-            SELECT merchant, AVG(-amount) AS avg_spend, COUNT(*) AS n
-            FROM transactions
-            WHERE amount < 0
+            SELECT t.merchant, AVG(-{FLOW}) AS avg_spend, COUNT(*) AS n
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE {FLOW} < 0
               {_HC_TRANSFERISH}
-              AND date >= ? AND date < ?
-              AND merchant IS NOT NULL AND merchant != ''
-            GROUP BY merchant
+              AND t.date >= ? AND t.date < ?
+              AND t.merchant IS NOT NULL AND t.merchant != ''
+            GROUP BY t.merchant
             HAVING n >= 2
         )
         SELECT t.id, t.date, t.merchant, t.category,
-               -t.amount AS amount,
+               -{FLOW} AS amount,
                b.avg_spend,
-               ROUND(-t.amount / b.avg_spend, 2) AS ratio
+               ROUND(-{FLOW} / b.avg_spend, 2) AS ratio
         FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
         JOIN baseline b ON b.merchant = t.merchant
-        WHERE t.amount < 0
+        WHERE {FLOW} < 0
           {t_filter}
           AND t.date >= ? AND t.date <= ?
-          AND -t.amount >= 20
-          AND -t.amount > b.avg_spend * 2
+          AND -{FLOW} >= 20
+          AND -{FLOW} > b.avg_spend * 2
         ORDER BY ratio DESC
         LIMIT 20
         """,
@@ -433,25 +480,28 @@ def _hc_outliers(conn, lookback_start: str, current_start: str, current_end: str
 
 
 def _hc_new_merchants(conn, lookback_start: str, current_start: str, current_end: str) -> list[dict]:
+    FLOW = classify.FLOW_EXPR
     rows = conn.execute(
         f"""
-        SELECT merchant,
-               MIN(date) AS first_seen,
-               SUM(-amount) AS spent,
+        SELECT t.merchant,
+               MIN(t.date) AS first_seen,
+               SUM(-{FLOW}) AS spent,
                COUNT(*) AS count
-        FROM transactions
-        WHERE amount < 0
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        WHERE {FLOW} < 0
           {_HC_TRANSFERISH}
-          AND merchant IS NOT NULL AND merchant != ''
-          AND date >= ? AND date <= ?
-          AND merchant NOT IN (
-              SELECT DISTINCT merchant FROM transactions
-              WHERE amount < 0
-                {_HC_TRANSFERISH}
-                AND merchant IS NOT NULL
-                AND date >= ? AND date < ?
+          AND t.merchant IS NOT NULL AND t.merchant != ''
+          AND t.date >= ? AND t.date <= ?
+          AND t.merchant NOT IN (
+              SELECT DISTINCT t2.merchant FROM transactions t2
+              JOIN accounts a2 ON a2.id = t2.account_id
+              WHERE (CASE WHEN a2.type IN ('credit','loan') THEN -t2.amount ELSE t2.amount END) < 0
+                AND t2.is_transfer = 0 AND t2.excluded = 0
+                AND t2.merchant IS NOT NULL
+                AND t2.date >= ? AND t2.date < ?
           )
-        GROUP BY merchant
+        GROUP BY t.merchant
         HAVING spent >= 20
         ORDER BY spent DESC
         LIMIT 20
@@ -478,13 +528,15 @@ def _hc_buffer(conn, today_iso: str) -> dict:
         FROM accounts
         """
     ).fetchone()
+    FLOW = classify.FLOW_EXPR
     spend = conn.execute(
         f"""
-        SELECT COALESCE(SUM(-amount), 0) AS total
-        FROM transactions
-        WHERE amount < 0
+        SELECT COALESCE(SUM(-{FLOW}), 0) AS total
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        WHERE {FLOW} < 0
           {_HC_TRANSFERISH}
-          AND date >= ?
+          AND t.date >= ?
         """,
         (lookback_90,),
     ).fetchone()
@@ -521,21 +573,65 @@ def _hc_cc(conn) -> list[dict]:
     ]
 
 
+_GROUP_ORDER = {
+    "income": ("salary", "refund", "other"),
+    "fixed": ("rent", "utility", "subscription", "membership", "insurance", "loan", "other"),
+    "variable": (
+        "groceries", "dining", "transport", "shopping", "health",
+        "entertainment", "travel", "personal", "fees", "other",
+    ),
+}
+
+
+def _project_monthly(avg_amount: float, cadence: Optional[str]) -> Optional[float]:
+    """Normalize a typical per-occurrence amount to a monthly-equivalent."""
+    if not cadence or avg_amount is None:
+        return None
+    if cadence == "biweekly":
+        return round(avg_amount * 26 / 12, 2)
+    if cadence == "weekly":
+        return round(avg_amount * 52 / 12, 2)
+    if cadence == "monthly":
+        return round(avg_amount, 2)
+    if cadence == "bimonthly":
+        return round(avg_amount / 2, 2)
+    return None
+
+
+def _infer_cadence_for_merchant(conn, merchant: str, lookback_start: str) -> Optional[str]:
+    rows = conn.execute(
+        "SELECT date FROM transactions WHERE merchant = ? AND excluded = 0 AND is_transfer = 0 "
+        "AND date >= ? ORDER BY date",
+        (merchant, lookback_start),
+    ).fetchall()
+    if len(rows) < 2:
+        return None
+    from .classify import _cadence_days, _cadence_label
+    gap = _cadence_days([r["date"] for r in rows])
+    if gap is None:
+        return None
+    return _cadence_label(gap)
+
+
 @mcp.tool()
 def healthcheck(window_days: int = 30, lookback_days: int = 180) -> dict:
-    """
-    Structured financial-health signals: subscriptions, category MoM trends,
-    transaction outliers, new merchants, cash buffer, credit-card utilization.
+    """Structured monthly financial picture using persisted merchant classifications.
 
-    Compares a trailing `window_days` window to the prior window of the same
-    length (default: last 30d vs. 30d before that). Baselines for outliers and
-    new-merchant detection look back `lookback_days` (default 180).
+    Expects `auto_enrich` + LLM classification to have been run first so that
+    merchants are labeled. Any merchant without a classification ends up in
+    `unclassified` and does not count toward income / fixed / variable totals.
 
-    All amounts are dollars, positive = money out. Transfers (is_transfer=1)
-    and excluded (excluded=1) transactions are filtered from every signal.
-
-    Caller is expected to narrate: return value is machine signals + a `flags`
-    array of high-level labels for the LLM to pick up on.
+    Output:
+      window                — date ranges
+      income                — actual in window + sources + projected monthly
+      fixed                 — total + group breakdown + itemized list
+      variable              — total + group breakdown + top merchants
+      savings               — income - fixed - variable, rate %, projected
+      buffer                — checking + total_liquid + runway_days
+      cc_utilization        — credit card balances + available credit
+      unclassified          — merchants with spend that need a label
+      anomalies             — outliers, new_merchants, subscription_price_changes
+      flags                 — high-level labels for the LLM to pick up on
     """
     window_days = max(7, min(window_days, 90))
     lookback_days = max(window_days * 2, min(lookback_days, 365))
@@ -555,35 +651,237 @@ def healthcheck(window_days: int = 30, lookback_days: int = 180) -> dict:
     lookback_start_iso = lookback_start.isoformat()
 
     with db.cursor() as conn:
-        subs = _hc_subscriptions(conn, lookback_start_iso, today_iso, current_start_iso)
-        trends = _hc_category_trends(conn, prior_start_iso, current_start_iso, current_end_iso)
+        classifications = classify.all_classifications(conn)
+
+        # Transactions in current window, excluding transfers/excluded/card-payments.
+        # `flow` normalizes the sign across account types so flow > 0 = inflow
+        # (income/refund) and flow < 0 = outflow (spend), regardless of whether
+        # the tx is on a depository or credit account.
+        rows = conn.execute(
+            f"""
+            SELECT t.merchant, t.description, t.date,
+                   {classify.FLOW_EXPR} AS flow,
+                   a.type AS account_type
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.date >= ? AND t.date <= ?
+              {_HC_TRANSFERISH}
+            """,
+            (current_start_iso, current_end_iso),
+        ).fetchall()
+
+        # Bucket by classification
+        income_by_merchant: dict[str, dict] = {}
+        fixed_items: dict[tuple[str, str], dict] = {}   # (merchant, classification) -> aggregate
+        variable_by_group: dict[str, float] = {g: 0.0 for g in _GROUP_ORDER["variable"]}
+        variable_by_merchant: dict[str, float] = {}
+        unclassified_total = 0.0
+        unclassified_merchants: dict[str, dict] = {}
+        refund_offsets = 0.0  # positive credit-card amounts with no merchant class
+
+        for r in rows:
+            m = r["merchant"] or (r["description"] or "").strip()
+            if not m:
+                continue
+            cls_row = classifications.get(m)
+            cls = cls_row["classification"] if cls_row else None
+            amt = r["flow"]
+            is_depository = r["account_type"] == "depository"
+
+            if cls == "transfer":
+                continue
+
+            # Positive amount: income (depository + income class, or depository + unclassified),
+            # or refund offsetting a classified spend merchant.
+            if amt > 0:
+                if cls and cls.startswith("income:"):
+                    sub = cls.split(":", 1)[1]
+                    agg = income_by_merchant.setdefault(
+                        m,
+                        {"merchant": m, "classification": cls, "subgroup": sub,
+                         "total": 0.0, "count": 0},
+                    )
+                    agg["total"] += amt
+                    agg["count"] += 1
+                    continue
+                if cls and cls.startswith("variable:"):
+                    # Refund on a variable-spend merchant — offset the category.
+                    sub = cls.split(":", 1)[1]
+                    variable_by_group[sub] = variable_by_group.get(sub, 0.0) - amt
+                    variable_by_merchant[m] = variable_by_merchant.get(m, 0.0) - amt
+                    continue
+                if cls and cls.startswith("fixed:"):
+                    # Refund on a fixed-cost merchant — reduce that line item.
+                    sub = cls.split(":", 1)[1]
+                    key = (m, cls)
+                    agg = fixed_items.setdefault(
+                        key,
+                        {"merchant": m, "classification": cls, "subgroup": sub,
+                         "total": 0.0, "count": 0,
+                         "notes": (cls_row or {}).get("notes")},
+                    )
+                    agg["total"] -= amt
+                    continue
+                # Unclassified positive: real income only if from depository;
+                # credit-card positive is a pure refund (merchant unknown, so
+                # we can't offset — count it as a refund we saw but didn't place).
+                if is_depository:
+                    agg = income_by_merchant.setdefault(
+                        m,
+                        {"merchant": m, "classification": "income:other",
+                         "subgroup": "other", "total": 0.0, "count": 0},
+                    )
+                    agg["total"] += amt
+                    agg["count"] += 1
+                else:
+                    refund_offsets += amt
+                continue
+
+            # amt < 0 from here on: spend
+            spend = -amt
+
+            if cls and cls.startswith("fixed:"):
+                sub = cls.split(":", 1)[1]
+                key = (m, cls)
+                agg = fixed_items.setdefault(
+                    key,
+                    {"merchant": m, "classification": cls, "subgroup": sub,
+                     "total": 0.0, "count": 0,
+                     "notes": (cls_row or {}).get("notes")},
+                )
+                agg["total"] += spend
+                agg["count"] += 1
+                continue
+
+            if cls and cls.startswith("variable:"):
+                sub = cls.split(":", 1)[1]
+                variable_by_group[sub] = variable_by_group.get(sub, 0.0) + spend
+                variable_by_merchant[m] = variable_by_merchant.get(m, 0.0) + spend
+                continue
+
+            # Unclassified spend
+            unclassified_total += spend
+            u = unclassified_merchants.setdefault(
+                m, {"merchant": m, "total": 0.0, "count": 0},
+            )
+            u["total"] += spend
+            u["count"] += 1
+
+        # Projected monthly income from cadence
+        income_sources = []
+        projected_income = 0.0
+        for agg in income_by_merchant.values():
+            m = agg["merchant"]
+            cadence = None
+            note = (classifications.get(m, {}) or {}).get("notes") or ""
+            for tag in ("biweekly", "monthly", "weekly", "bimonthly"):
+                if tag in note:
+                    cadence = tag
+                    break
+            if not cadence:
+                cadence = _infer_cadence_for_merchant(conn, m, lookback_start_iso)
+            avg_per = agg["total"] / agg["count"] if agg["count"] else 0
+            proj = _project_monthly(avg_per, cadence)
+            if proj is not None:
+                projected_income += proj
+            income_sources.append({
+                "merchant": m,
+                "classification": agg["classification"],
+                "total": round(agg["total"], 2),
+                "count": agg["count"],
+                "cadence": cadence,
+                "projected_monthly": proj,
+            })
+        income_sources.sort(key=lambda x: x["total"], reverse=True)
+        income_total = sum(s["total"] for s in income_sources)
+
+        # Fixed groups
+        fixed_groups = {g: 0.0 for g in _GROUP_ORDER["fixed"]}
+        fixed_item_list = []
+        for agg in fixed_items.values():
+            fixed_groups[agg["subgroup"]] = fixed_groups.get(agg["subgroup"], 0.0) + agg["total"]
+            fixed_item_list.append({
+                "merchant": agg["merchant"],
+                "classification": agg["classification"],
+                "subgroup": agg["subgroup"],
+                "total": round(agg["total"], 2),
+                "count": agg["count"],
+                "notes": agg.get("notes"),
+            })
+        fixed_item_list.sort(key=lambda x: x["total"], reverse=True)
+        fixed_total = sum(fixed_groups.values())
+
+        # Variable
+        variable_merchants_sorted = sorted(
+            [{"merchant": m, "total": round(t, 2)}
+             for m, t in variable_by_merchant.items()],
+            key=lambda x: x["total"], reverse=True,
+        )[:10]
+        variable_total = sum(variable_by_group.values())
+
+        # Unclassified
+        unclassified_list = sorted(
+            [
+                {"merchant": u["merchant"], "total": round(u["total"], 2), "count": u["count"]}
+                for u in unclassified_merchants.values()
+            ],
+            key=lambda x: x["total"], reverse=True,
+        )
+
+        # Signals
         outliers = _hc_outliers(conn, lookback_start_iso, current_start_iso, current_end_iso)
         new_mers = _hc_new_merchants(conn, lookback_start_iso, current_start_iso, current_end_iso)
+        subs_changes = _hc_subscriptions(conn, lookback_start_iso, today_iso, current_start_iso)
         buffer = _hc_buffer(conn, today_iso)
         cc = _hc_cc(conn)
 
-    flags: list[str] = []
-    for s in subs:
-        # Only flag amount-change signals on STABLE subscriptions. Grocery/restaurant
-        # spend naturally varies and flagging those as "price changes" is noise.
+    # Savings math
+    net = income_total - fixed_total - variable_total
+    rate_pct = round(net / income_total * 100, 1) if income_total > 0 else None
+    projected_variable = round(variable_total * (30 / window_days), 2)
+    # Fixed scales less cleanly in short windows; use the raw window total.
+    projected_net = (
+        projected_income - fixed_total - projected_variable
+        if projected_income > 0 else None
+    )
+    projected_rate = (
+        round(projected_net / projected_income * 100, 1)
+        if projected_income > 0 and projected_net is not None else None
+    )
+
+    # Subscription price changes — reuse the old signal
+    sub_price_changes = []
+    for s in subs_changes:
         if not s["amount_stable"]:
             continue
-        if s["new"]:
-            flags.append(f"new_subscription:{s['merchant']}:${s['avg_amount']}")
-        elif s["amount_change_pct"] is not None and abs(s["amount_change_pct"]) >= 15:
-            direction = "up" if s["amount_change_pct"] > 0 else "down"
-            flags.append(f"subscription_price_{direction}:{s['merchant']}:{s['amount_change_pct']}%")
-    for t in trends:
-        if t["new_category"] and t["current"] >= 50:
-            flags.append(f"new_category_spend:{t['category']}:${t['current']}")
-        elif t["pct_change"] is not None and t["pct_change"] >= 25 and t["abs_change"] >= 50:
-            flags.append(f"category_surge:{t['category']}:+${t['abs_change']}:{t['pct_change']}%")
-        elif t["pct_change"] is not None and t["pct_change"] <= -25 and t["abs_change"] <= -50:
-            flags.append(f"category_drop:{t['category']}:${t['abs_change']}:{t['pct_change']}%")
-    if len(outliers) >= 3:
-        flags.append(f"many_outliers:{len(outliers)}")
+        if s["amount_change_pct"] is not None and abs(s["amount_change_pct"]) >= 15:
+            sub_price_changes.append({
+                "merchant": s["merchant"],
+                "avg_amount": s["avg_amount"],
+                "change_pct": s["amount_change_pct"],
+                "direction": "up" if s["amount_change_pct"] > 0 else "down",
+            })
+
+    flags: list[str] = []
+    if rate_pct is not None and rate_pct < 0:
+        flags.append(f"negative_savings:{rate_pct}%")
+    elif rate_pct is not None and rate_pct < 10:
+        flags.append(f"low_savings:{rate_pct}%")
     if buffer["runway_days"] is not None and buffer["runway_days"] < 60:
         flags.append(f"low_runway:{buffer['runway_days']}d")
+    if unclassified_total >= max(100, variable_total * 0.25):
+        flags.append(f"unclassified_spend:${round(unclassified_total, 2)}")
+    for cc_row in cc:
+        if cc_row["available_credit"] and cc_row["balance_owed"] > 0:
+            total_limit = cc_row["balance_owed"] + cc_row["available_credit"]
+            if total_limit > 0 and cc_row["balance_owed"] / total_limit > 0.5:
+                flags.append(
+                    f"cc_high_util:{cc_row['name']}:{round(cc_row['balance_owed'] / total_limit * 100, 1)}%"
+                )
+    for spc in sub_price_changes:
+        flags.append(f"subscription_price_{spc['direction']}:{spc['merchant']}:{spc['change_pct']}%")
+    if len(outliers) >= 3:
+        flags.append(f"many_outliers:{len(outliers)}")
 
     return {
         "window": {
@@ -592,13 +890,44 @@ def healthcheck(window_days: int = 30, lookback_days: int = 180) -> dict:
             "prior_start": prior_start_iso,
             "prior_end": prior_end_iso,
             "lookback_start": lookback_start_iso,
+            "window_days": window_days,
         },
-        "subscriptions": subs,
-        "category_trends": trends,
-        "outliers": outliers,
-        "new_merchants": new_mers,
+        "income": {
+            "total": round(income_total, 2),
+            "projected_monthly": round(projected_income, 2) if projected_income > 0 else None,
+            "sources": income_sources,
+        },
+        "fixed": {
+            "total": round(fixed_total, 2),
+            "groups": {k: round(v, 2) for k, v in fixed_groups.items()},
+            "items": fixed_item_list,
+        },
+        "variable": {
+            "total": round(variable_total, 2),
+            "groups": {k: round(v, 2) for k, v in variable_by_group.items()},
+            "top_merchants": variable_merchants_sorted,
+        },
+        "savings": {
+            "income": round(income_total, 2),
+            "fixed": round(fixed_total, 2),
+            "variable": round(variable_total, 2),
+            "net": round(net, 2),
+            "rate_pct": rate_pct,
+            "projected_monthly_net": round(projected_net, 2) if projected_net is not None else None,
+            "projected_monthly_rate_pct": projected_rate,
+        },
         "buffer": buffer,
         "cc_utilization": cc,
+        "unclassified": {
+            "total": round(unclassified_total, 2),
+            "merchants": unclassified_list,
+        },
+        "refunds_unattributed": round(refund_offsets, 2),
+        "anomalies": {
+            "outliers": outliers,
+            "new_merchants": new_mers,
+            "subscription_price_changes": sub_price_changes,
+        },
         "flags": flags,
     }
 
