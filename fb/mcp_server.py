@@ -252,6 +252,357 @@ def month_summary(year: int, month: int) -> dict:
     }
 
 
+# Transactions that look like internal transfers even when is_transfer isn't set:
+# credit-card payments (AUTOPAY, ONLINE PAYMENT, etc.) and merchants that are
+# bank/card issuer names. Mirrors the heuristics in the fb-transfers skill so
+# that aggregates (spend baseline, runway, outliers) don't count these as spend.
+_HC_TRANSFERISH = """
+  AND is_transfer = 0 AND excluded = 0
+  AND COALESCE(category, '') NOT IN ('transfer', 'investment')
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%AUTOPAY%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%AUTO-PMT%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%AUTOMATIC PAYMENT%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%ONLINE PAYMENT%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%MOBILE PAYMENT%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%CC PAYMENT%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%PAYMENT THANK YOU%'
+  -- Capital One self-transfer pattern: "Withdrawal to <name> XXXXXXXnnnn"
+  AND UPPER(COALESCE(description, '')) NOT LIKE 'WITHDRAWAL TO %XXXXXXX%'
+  -- PayPal / Zelle instant transfers are typically self-moves
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%INST XFER%'
+  AND UPPER(COALESCE(description, '')) NOT LIKE '%PAYPAL%INST%'
+  AND UPPER(COALESCE(merchant, '')) NOT IN (
+        'CITI', 'CITIBANK', 'CHASE', 'JPMORGAN CHASE',
+        'AMEX', 'AMERICAN EXPRESS', 'CAPITAL ONE', 'CAPITALONE',
+        'DISCOVER', 'BARCLAYCARD', 'BARCLAYS', 'WELLS FARGO',
+        'BANK OF AMERICA', 'BOFA', 'US BANK', 'USAA',
+        'ROBINHOOD', 'MSPBNA', 'FIDELITY', 'VANGUARD', 'SCHWAB',
+        'MORGAN STANLEY', 'E*TRADE', 'ETRADE'
+  )
+"""
+
+
+def _hc_subscriptions(conn, lookback_start: str, today: str, current_start: str) -> list[dict]:
+    # Recurring charges: a merchant seen in ≥3 distinct calendar months. We no
+    # longer require tight amount spread — variable subscriptions (overage
+    # billing, annual-vs-monthly plans) are still useful to surface. The
+    # `amount_stable` flag distinguishes fixed-price subs from variable ones.
+    rows = conn.execute(
+        f"""
+        SELECT merchant,
+               COUNT(*) AS tx_count,
+               COUNT(DISTINCT strftime('%Y-%m', date)) AS months_seen,
+               AVG(-amount) AS avg_amount,
+               MIN(-amount) AS min_amount,
+               MAX(-amount) AS max_amount,
+               MIN(date) AS first_seen,
+               MAX(date) AS last_seen
+        FROM transactions
+        WHERE amount < 0
+          {_HC_TRANSFERISH}
+          AND date >= ? AND date <= ?
+          AND merchant IS NOT NULL AND merchant != ''
+        GROUP BY merchant
+        HAVING months_seen >= 3
+           AND avg_amount >= 5
+           AND tx_count >= months_seen
+        ORDER BY avg_amount DESC
+        """,
+        (lookback_start, today),
+    ).fetchall()
+
+    out = []
+    for r in rows:
+        split = conn.execute(
+            f"""
+            SELECT AVG(CASE WHEN date >= ? THEN -amount END) AS cur_avg,
+                   AVG(CASE WHEN date <  ? THEN -amount END) AS prior_avg
+            FROM transactions
+            WHERE merchant = ? AND amount < 0
+              {_HC_TRANSFERISH}
+              AND date >= ? AND date <= ?
+            """,
+            (current_start, current_start, r["merchant"], lookback_start, today),
+        ).fetchone()
+        change_pct = None
+        if split["cur_avg"] is not None and split["prior_avg"]:
+            change_pct = round((split["cur_avg"] - split["prior_avg"]) / split["prior_avg"] * 100, 1)
+        spread = (r["max_amount"] - r["min_amount"]) / r["avg_amount"] if r["avg_amount"] else 0
+        out.append({
+            "merchant": r["merchant"],
+            "avg_amount": round(r["avg_amount"], 2),
+            "min_amount": round(r["min_amount"], 2),
+            "max_amount": round(r["max_amount"], 2),
+            "months_seen": r["months_seen"],
+            "tx_count": r["tx_count"],
+            "first_seen": r["first_seen"],
+            "last_seen": r["last_seen"],
+            "new": r["first_seen"] >= current_start,
+            "amount_stable": spread <= 0.25,
+            "amount_change_pct": change_pct,
+        })
+    return out
+
+
+def _hc_category_trends(conn, prior_start: str, current_start: str, current_end: str) -> list[dict]:
+    rows = conn.execute(
+        f"""
+        SELECT COALESCE(category, 'uncategorized') AS category,
+               SUM(CASE WHEN date >= ? THEN -amount ELSE 0 END) AS cur_total,
+               SUM(CASE WHEN date <  ? THEN -amount ELSE 0 END) AS prior_total
+        FROM transactions
+        WHERE amount < 0
+          {_HC_TRANSFERISH}
+          AND date >= ? AND date <= ?
+        GROUP BY COALESCE(category, 'uncategorized')
+        """,
+        (current_start, current_start, prior_start, current_end),
+    ).fetchall()
+
+    out = []
+    for r in rows:
+        cur = round(r["cur_total"] or 0, 2)
+        prior = round(r["prior_total"] or 0, 2)
+        abs_change = round(cur - prior, 2)
+        if prior > 0:
+            pct = round((cur - prior) / prior * 100, 1)
+        elif cur > 0:
+            pct = None  # undefined — flag via "new_category" instead
+        else:
+            pct = 0.0
+        out.append({
+            "category": r["category"],
+            "current": cur,
+            "prior": prior,
+            "abs_change": abs_change,
+            "pct_change": pct,
+            "new_category": prior == 0 and cur > 0,
+        })
+    out.sort(key=lambda x: abs(x["abs_change"]), reverse=True)
+    return out
+
+
+def _hc_outliers(conn, lookback_start: str, current_start: str, current_end: str) -> list[dict]:
+    # Build the outlier query: inline the transfer-ish filter in the baseline CTE
+    # and again in the outer tx scan. Aliased for the outer `t.*` references.
+    t_filter = _HC_TRANSFERISH.replace(" is_transfer ", " t.is_transfer ") \
+                              .replace(" excluded ", " t.excluded ") \
+                              .replace("COALESCE(category", "COALESCE(t.category") \
+                              .replace("COALESCE(description", "COALESCE(t.description") \
+                              .replace("COALESCE(merchant", "COALESCE(t.merchant")
+    rows = conn.execute(
+        f"""
+        WITH baseline AS (
+            SELECT merchant, AVG(-amount) AS avg_spend, COUNT(*) AS n
+            FROM transactions
+            WHERE amount < 0
+              {_HC_TRANSFERISH}
+              AND date >= ? AND date < ?
+              AND merchant IS NOT NULL AND merchant != ''
+            GROUP BY merchant
+            HAVING n >= 2
+        )
+        SELECT t.id, t.date, t.merchant, t.category,
+               -t.amount AS amount,
+               b.avg_spend,
+               ROUND(-t.amount / b.avg_spend, 2) AS ratio
+        FROM transactions t
+        JOIN baseline b ON b.merchant = t.merchant
+        WHERE t.amount < 0
+          {t_filter}
+          AND t.date >= ? AND t.date <= ?
+          AND -t.amount >= 20
+          AND -t.amount > b.avg_spend * 2
+        ORDER BY ratio DESC
+        LIMIT 20
+        """,
+        (lookback_start, current_start, current_start, current_end),
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "date": r["date"],
+            "merchant": r["merchant"],
+            "category": r["category"],
+            "amount": round(r["amount"], 2),
+            "typical": round(r["avg_spend"], 2),
+            "ratio": r["ratio"],
+        }
+        for r in rows
+    ]
+
+
+def _hc_new_merchants(conn, lookback_start: str, current_start: str, current_end: str) -> list[dict]:
+    rows = conn.execute(
+        f"""
+        SELECT merchant,
+               MIN(date) AS first_seen,
+               SUM(-amount) AS spent,
+               COUNT(*) AS count
+        FROM transactions
+        WHERE amount < 0
+          {_HC_TRANSFERISH}
+          AND merchant IS NOT NULL AND merchant != ''
+          AND date >= ? AND date <= ?
+          AND merchant NOT IN (
+              SELECT DISTINCT merchant FROM transactions
+              WHERE amount < 0
+                {_HC_TRANSFERISH}
+                AND merchant IS NOT NULL
+                AND date >= ? AND date < ?
+          )
+        GROUP BY merchant
+        HAVING spent >= 20
+        ORDER BY spent DESC
+        LIMIT 20
+        """,
+        (current_start, current_end, lookback_start, current_start),
+    ).fetchall()
+    return [
+        {
+            "merchant": r["merchant"],
+            "first_seen": r["first_seen"],
+            "spent": round(r["spent"], 2),
+            "count": r["count"],
+        }
+        for r in rows
+    ]
+
+
+def _hc_buffer(conn, today_iso: str) -> dict:
+    lookback_90 = (date.fromisoformat(today_iso) - timedelta(days=90)).isoformat()
+    acct = conn.execute(
+        """
+        SELECT COALESCE(SUM(CASE WHEN LOWER(name) LIKE '%checking%' THEN current_balance END), 0) AS checking,
+               COALESCE(SUM(CASE WHEN type = 'depository' THEN current_balance END), 0) AS total_liquid
+        FROM accounts
+        """
+    ).fetchone()
+    spend = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(-amount), 0) AS total
+        FROM transactions
+        WHERE amount < 0
+          {_HC_TRANSFERISH}
+          AND date >= ?
+        """,
+        (lookback_90,),
+    ).fetchone()
+    avg_monthly = round((spend["total"] or 0) / 3.0, 2)
+    runway_days = None
+    # Runway uses total liquid (checking + savings) because savings are instantly
+    # transferable. Checking alone dramatically understates real runway.
+    if avg_monthly > 0:
+        runway_days = round(acct["total_liquid"] / (avg_monthly / 30), 1)
+    return {
+        "checking_balance": round(acct["checking"], 2),
+        "total_liquid": round(acct["total_liquid"], 2),
+        "avg_monthly_spend_90d": avg_monthly,
+        "runway_days": runway_days,
+    }
+
+
+def _hc_cc(conn) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT name, current_balance, available_balance
+        FROM accounts
+        WHERE type IN ('credit', 'loan') AND current_balance IS NOT NULL
+        ORDER BY current_balance DESC
+        """
+    ).fetchall()
+    return [
+        {
+            "name": r["name"],
+            "balance_owed": round(r["current_balance"], 2),
+            "available_credit": round(r["available_balance"], 2) if r["available_balance"] is not None else None,
+        }
+        for r in rows
+    ]
+
+
+@mcp.tool()
+def healthcheck(window_days: int = 30, lookback_days: int = 180) -> dict:
+    """
+    Structured financial-health signals: subscriptions, category MoM trends,
+    transaction outliers, new merchants, cash buffer, credit-card utilization.
+
+    Compares a trailing `window_days` window to the prior window of the same
+    length (default: last 30d vs. 30d before that). Baselines for outliers and
+    new-merchant detection look back `lookback_days` (default 180).
+
+    All amounts are dollars, positive = money out. Transfers (is_transfer=1)
+    and excluded (excluded=1) transactions are filtered from every signal.
+
+    Caller is expected to narrate: return value is machine signals + a `flags`
+    array of high-level labels for the LLM to pick up on.
+    """
+    window_days = max(7, min(window_days, 90))
+    lookback_days = max(window_days * 2, min(lookback_days, 365))
+
+    today = date.today()
+    current_end = today
+    current_start = today - timedelta(days=window_days)
+    prior_end = current_start - timedelta(days=1)
+    prior_start = prior_end - timedelta(days=window_days - 1)
+    lookback_start = today - timedelta(days=lookback_days)
+
+    today_iso = today.isoformat()
+    current_start_iso = current_start.isoformat()
+    current_end_iso = current_end.isoformat()
+    prior_start_iso = prior_start.isoformat()
+    prior_end_iso = prior_end.isoformat()
+    lookback_start_iso = lookback_start.isoformat()
+
+    with db.cursor() as conn:
+        subs = _hc_subscriptions(conn, lookback_start_iso, today_iso, current_start_iso)
+        trends = _hc_category_trends(conn, prior_start_iso, current_start_iso, current_end_iso)
+        outliers = _hc_outliers(conn, lookback_start_iso, current_start_iso, current_end_iso)
+        new_mers = _hc_new_merchants(conn, lookback_start_iso, current_start_iso, current_end_iso)
+        buffer = _hc_buffer(conn, today_iso)
+        cc = _hc_cc(conn)
+
+    flags: list[str] = []
+    for s in subs:
+        # Only flag amount-change signals on STABLE subscriptions. Grocery/restaurant
+        # spend naturally varies and flagging those as "price changes" is noise.
+        if not s["amount_stable"]:
+            continue
+        if s["new"]:
+            flags.append(f"new_subscription:{s['merchant']}:${s['avg_amount']}")
+        elif s["amount_change_pct"] is not None and abs(s["amount_change_pct"]) >= 15:
+            direction = "up" if s["amount_change_pct"] > 0 else "down"
+            flags.append(f"subscription_price_{direction}:{s['merchant']}:{s['amount_change_pct']}%")
+    for t in trends:
+        if t["new_category"] and t["current"] >= 50:
+            flags.append(f"new_category_spend:{t['category']}:${t['current']}")
+        elif t["pct_change"] is not None and t["pct_change"] >= 25 and t["abs_change"] >= 50:
+            flags.append(f"category_surge:{t['category']}:+${t['abs_change']}:{t['pct_change']}%")
+        elif t["pct_change"] is not None and t["pct_change"] <= -25 and t["abs_change"] <= -50:
+            flags.append(f"category_drop:{t['category']}:${t['abs_change']}:{t['pct_change']}%")
+    if len(outliers) >= 3:
+        flags.append(f"many_outliers:{len(outliers)}")
+    if buffer["runway_days"] is not None and buffer["runway_days"] < 60:
+        flags.append(f"low_runway:{buffer['runway_days']}d")
+
+    return {
+        "window": {
+            "current_start": current_start_iso,
+            "current_end": current_end_iso,
+            "prior_start": prior_start_iso,
+            "prior_end": prior_end_iso,
+            "lookback_start": lookback_start_iso,
+        },
+        "subscriptions": subs,
+        "category_trends": trends,
+        "outliers": outliers,
+        "new_merchants": new_mers,
+        "buffer": buffer,
+        "cc_utilization": cc,
+        "flags": flags,
+    }
+
+
 @mcp.tool()
 def sync_now(institution_id: Optional[str] = None) -> dict:
     """Pull fresh data from Teller. Omit institution_id to sync all."""
