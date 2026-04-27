@@ -3,7 +3,7 @@
 Data Migration Script: Migrate existing data to authenticated user
 
 This script:
-1. Creates the target user account (oliveren88@gmail.com)
+1. Creates the target user account (support@example.com)
 2. Migrates all existing data from demo@example.com to the new user
 3. Updates all related records (institutions, goals, income sources, etc.)
 
@@ -22,7 +22,7 @@ from app.models import User, Institution, UserProfile, Goal, IncomeSource, Insig
 from app.models.models import generate_uuid
 
 # Target user credentials
-TARGET_EMAIL = "oliveren88@gmail.com"
+TARGET_EMAIL = "support@example.com"
 TARGET_PASSWORD = "Ol@rjl88"
 TARGET_NAME = "Oliver"
 

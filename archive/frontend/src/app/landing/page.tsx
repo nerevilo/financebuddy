@@ -811,7 +811,7 @@ export default function LandingPage() {
             <div className="flex items-center gap-6 text-sm text-slate-500">
               <Link href="/privacy" className="hover:text-slate-700 transition-colors">Privacy</Link>
               <Link href="/terms" className="hover:text-slate-700 transition-colors">Terms</Link>
-              <a href="mailto:oliveren88@gmail.com" className="hover:text-slate-700 transition-colors">Contact</a>
+              <a href="mailto:support@example.com" className="hover:text-slate-700 transition-colors">Contact</a>
             </div>
           </div>
           <div className="mt-8 text-center text-sm text-slate-400">

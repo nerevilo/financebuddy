@@ -5,8 +5,8 @@ Test script for Teller API exploration
 import subprocess
 import json
 
-CERT_PATH = "/Users/olive/Documents/claudecode/financeplanning/certificate.pem"
-KEY_PATH = "/Users/olive/Documents/claudecode/financeplanning/private_key.pem"
+CERT_PATH = "./certificate.pem"
+KEY_PATH = "./private_key.pem"
 
 def make_request(url, auth_token=None):
     """Make a request to Teller API using curl"""

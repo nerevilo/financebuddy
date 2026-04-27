@@ -805,8 +805,8 @@ Please call GET /api/v1/summary to see my financial overview."`}
           <div className="mt-4 p-4 bg-slate-50 rounded-lg">
             <p className="text-sm text-slate-600">
               Need to export your data or delete your account? Contact us at{' '}
-              <a href="mailto:oliveren88@gmail.com" className="text-slate-800 underline hover:text-slate-600">
-                oliveren88@gmail.com
+              <a href="mailto:support@example.com" className="text-slate-800 underline hover:text-slate-600">
+                support@example.com
               </a>
             </p>
           </div>

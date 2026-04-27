@@ -23,12 +23,12 @@
 <p>Connect each bank once. Tokens save directly into the local SQLite DB — no copy-paste.</p>
 
 <label>Teller App ID</label>
-<input id="app_id" value="app_pn55bmnf8k4papve7o000">
+<input id="app_id" value="{{TELLER_APP_ID}}" placeholder="app_xxxxxxxxxxxxxxxxxxxx">
 
 <label>Environment</label>
-<select id="env">
+<select id="env" data-default="{{TELLER_ENV}}">
   <option value="sandbox">sandbox (test data)</option>
-  <option value="development" selected>development (your real accounts)</option>
+  <option value="development">development (your real accounts)</option>
   <option value="production">production</option>
 </select>
 
@@ -61,6 +61,12 @@ async function refreshLinked() {
   }
 }
 refreshLinked();
+
+(() => {
+  const sel = $('env');
+  const def = sel.dataset.default || 'development';
+  for (const opt of sel.options) if (opt.value === def) { sel.value = def; break; }
+})();
 
 $('go').addEventListener('click', () => {
   const appId = $('app_id').value.trim();

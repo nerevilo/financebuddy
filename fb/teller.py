@@ -10,10 +10,10 @@ import httpx
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TELLER_ENV = os.environ.get("TELLER_ENV", "sandbox")
 TELLER_CERT_PATH = Path(
-    os.environ.get("TELLER_CERT_PATH", PROJECT_ROOT / "backend" / "certificate.pem")
+    os.environ.get("TELLER_CERT_PATH", PROJECT_ROOT / "certificate.pem")
 )
 TELLER_KEY_PATH = Path(
-    os.environ.get("TELLER_KEY_PATH", PROJECT_ROOT / "backend" / "private_key.pem")
+    os.environ.get("TELLER_KEY_PATH", PROJECT_ROOT / "private_key.pem")
 )
 TELLER_API_URL = "https://api.teller.io"
 

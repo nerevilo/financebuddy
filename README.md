@@ -1,154 +1,123 @@
-# FinTrack - Personal Finance Dashboard
+# FinanceBuddy
 
-A personal finance tracking application that connects to your bank accounts via Teller API and provides spending insights.
+A **local, single-user** personal finance tool that lives inside Claude Code.
 
-## Features
+It pulls real bank data from [Teller.io](https://teller.io) into a local SQLite
+file, then exposes it to Claude through an MCP server — so you can ask things
+like:
 
-- **Connect multiple bank accounts** via Teller Connect
-- **Spending breakdown** by category (pie chart)
-- **Top merchants** analysis
-- **Period comparison** (this month vs last month)
-- **Income vs expenses** tracking
-- **Savings rate** calculation
+> *"Can I afford a $2k flight in May?"*
+> *"What's my net cash flow this month?"*
+> *"How much did I spend on dining last quarter?"*
 
-## Tech Stack
+…and Claude answers with your actual numbers.
 
-- **Backend**: Python + FastAPI
-- **Frontend**: Next.js + Tremor (charts) + Tailwind CSS
-- **Database**: SQLite (local)
-- **Banking API**: Teller.io
+No web UI, no hosted backend, no cloud DB. Your data stays on your machine.
 
-## Quick Start
+---
 
-### 1. Backend Setup
+## Setup (one shot)
 
-```bash
-cd backend
+You need:
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+- **macOS or Linux** with `python3` ≥ 3.10
+- **[Claude Code](https://claude.com/claude-code)** installed (`claude` on PATH)
+- A free **[Teller.io](https://teller.io)** account (development tier is free)
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the server
-python run.py
-```
-
-Backend will be running at http://localhost:8000
-
-### 2. Frontend Setup
+Then:
 
 ```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Run development server
-npm run dev
+git clone https://github.com/<you>/financebuddy.git
+cd financebuddy
+bash setup.sh
 ```
 
-Frontend will be running at http://localhost:3000
+`setup.sh` will:
 
-### 3. Connect a Bank Account
+1. Create `.venv/` and install dependencies (`httpx`, `fastmcp`).
+2. Check for your Teller mTLS certs at `certificate.pem` + `private_key.pem`.
+   If they're missing, it tells you exactly where to get them.
+3. Copy `.env.example` → `.env` (you'll set your own `TELLER_APP_ID` here).
+4. Register the `financebuddy` MCP server with Claude Code (user scope).
+5. Launch Teller Connect at `http://localhost:8787/` so you can link your
+   first bank account.
 
-1. Open http://localhost:3000
-2. Click "Connect Bank Account"
-3. In **sandbox mode**, use:
-   - Username: `username`
-   - Password: `password`
-4. Select accounts to connect
-5. View your dashboard!
+Re-running `setup.sh` is safe — every step is idempotent.
 
-## Project Structure
+---
 
-```
-financeplanning/
-├── backend/
-│   ├── app/
-│   │   ├── core/           # Config, database
-│   │   ├── models/         # SQLAlchemy models
-│   │   ├── routers/        # API endpoints
-│   │   ├── schemas/        # Pydantic schemas
-│   │   ├── services/       # Teller API service
-│   │   └── main.py         # FastAPI app
-│   ├── certificate.pem     # Teller certificate
-│   ├── private_key.pem     # Teller private key
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── app/            # Next.js pages
-│   │   ├── components/     # React components
-│   │   └── lib/            # API client, utilities
-│   └── package.json
-└── README.md
-```
+## Daily use
 
-## API Endpoints
+Open Claude Code anywhere on your machine and just talk to it:
 
-### Accounts
-- `GET /accounts/` - List all connected accounts
-- `GET /accounts/summary/balances` - Get balance summary
+| You say | Claude calls |
+|---|---|
+| "what's my net worth" | `get_balances` |
+| "how much did I spend on groceries last month" | `month_summary`, `list_transactions` |
+| "sync my accounts" | `sync_now` |
+| "any new charges since yesterday" | `sync_now` then `list_transactions` |
+| "anything weird in my spending" | `healthcheck` |
 
-### Transactions
-- `GET /transactions/` - List transactions (with filters)
-- `GET /transactions/recent` - Get recent transactions
-- `GET /transactions/search?q=...` - Search transactions
+The full list of tools lives in [CLAUDE.md](./CLAUDE.md).
 
-### Analytics
-- `GET /analytics/spending/by-category` - Spending breakdown by category
-- `GET /analytics/spending/by-merchant` - Top merchants
-- `GET /analytics/spending/trends` - Spending over time
-- `GET /analytics/comparison` - Compare periods
-- `GET /analytics/income-expenses` - Income vs expenses
+You can also drive it from the shell:
 
-### Teller Connect
-- `POST /teller/connect` - Save new bank connection
-- `POST /teller/sync/{institution_id}` - Sync transactions
-- `DELETE /teller/disconnect/{institution_id}` - Disconnect bank
-
-## Environment Variables
-
-### Backend (.env)
-```
-TELLER_APP_ID=app_pn55bmnf8k4papve7o000
-TELLER_CERT_PATH=./certificate.pem
-TELLER_KEY_PATH=./private_key.pem
-TELLER_ENV=sandbox
-DATABASE_URL=sqlite:///./fintrack.db
+```bash
+./.venv/bin/python -m fb.sync                 # pull fresh data
+./.venv/bin/python -m fb.connect_server       # link another bank
 ```
 
-### Frontend (.env.local)
+---
+
+## What's in the repo
+
 ```
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_TELLER_APP_ID=app_pn55bmnf8k4papve7o000
-NEXT_PUBLIC_TELLER_ENV=sandbox
+fb/                      ~6 file Python package — the whole app
+  db.py                  SQLite schema + connection helpers
+  teller.py              Teller API client (mTLS)
+  sync.py                CLI: Teller → SQLite upsert
+  link_bank.py           CLI: save one enrollment
+  connect.html           Teller Connect browser page
+  connect_server.py      Localhost server (port 8787) for Teller Connect
+  classify.py            Merchant taxonomy + auto-classify heuristics
+  mcp_server.py          fastmcp stdio server — what Claude talks to
+
+financebuddy.db          Your data. Gitignored. Don't commit it.
+certificate.pem          Teller mTLS cert. Gitignored.
+private_key.pem          Teller mTLS key. Gitignored.
+.env                     TELLER_APP_ID, TELLER_ENV. Gitignored.
+setup.sh                 One-shot installer (above).
+requirements.txt         httpx, fastmcp.
+CLAUDE.md                Project notes for Claude Code (read this).
+
+archive/                 Old SaaS-era code (FastAPI + Next.js). Dormant.
+                         Kept for history; nothing in the live app references it.
 ```
 
-## Teller Environments
+---
 
-- **sandbox**: Test with fake data (username/password)
-- **development**: Test with real bank accounts (your own)
-- **production**: For real users
+## Privacy & safety
 
-## Supported Banks (via Teller)
+- Everything is **local**. No telemetry, no third-party servers besides Teller.
+- `financebuddy.db` is plain SQLite. Your access tokens are stored unencrypted —
+  fine for a single-user laptop, but **don't commit the DB or the certs**
+  (the included `.gitignore` already blocks `*.pem`, `*.db`, and `.env`).
+- The MCP server is registered at **user scope** — only your account on this
+  machine can talk to it. There is no network listener.
 
-- Capital One ✅
-- Chase ✅
-- Bank of America ✅
-- Wells Fargo ✅
-- American Express ✅
-- 7,000+ more institutions
+---
 
-**Note**: Discover is NOT supported by Teller. Consider adding Plaid integration for Discover support in the future.
+## Troubleshooting
 
-## Future Enhancements
+**`claude mcp list` doesn't show `financebuddy`.**
+Re-run `bash setup.sh`. If `claude` isn't on your PATH, install Claude Code first.
 
-- [ ] Add Plaid integration for Discover
-- [ ] AI chat interface for natural language queries
-- [ ] Savings goals tracking
-- [ ] Budget alerts
-- [ ] CSV export
-- [ ] Mobile app (React Native)
+**`Teller certs missing` error on sync.**
+Drop your certs at `./certificate.pem` and `./private_key.pem`, or set
+`TELLER_CERT_PATH` / `TELLER_KEY_PATH` env vars to wherever you keep them.
+
+**`429 Too Many Requests` from Teller.**
+You're rate-limited. Wait a minute and re-run `fb.sync`.
+
+**Want a fresh start?**
+`rm financebuddy.db && bash setup.sh` will wipe local data and re-link.

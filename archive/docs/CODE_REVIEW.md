@@ -46,7 +46,7 @@ Even though `.gitignore` lists `.env`, these values exist in git commit history 
 **File:** `frontend/.env.local`
 
 ```
-NEXT_PUBLIC_TELLER_APP_ID=app_pn55bmnf8k4papve7o000
+NEXT_PUBLIC_TELLER_APP_ID=app_replace_with_your_own
 NEXT_PUBLIC_TELLER_ENV=development
 ```
 

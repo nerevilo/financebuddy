@@ -5,9 +5,9 @@
 A **local, single-user** personal finance tool. Pulls real bank data from Teller.io and exposes it to Claude Code via an MCP server so you can ask questions like "can I afford X?" or "how much did I spend on Y?" in conversation.
 
 **No web UI, no hosted backend, no auth, no cloud DB.** Just:
-- `fb/` — Python package (~5 files)
+- `fb/` — Python package (~8 files)
 - `financebuddy.db` — SQLite at project root
-- Teller mTLS certs at `backend/certificate.pem` + `backend/private_key.pem`
+- Teller mTLS certs at `certificate.pem` + `private_key.pem` (project root)
 - `financebuddy` MCP server registered at user scope in `~/.claude.json`
 
 ## Architecture
@@ -24,12 +24,14 @@ fb/
                     refuses file:// origins
   mcp_server.py     fastmcp stdio server — the surface Claude Code talks to
 
-financebuddy.db     SQLite, 3 tables: institutions, accounts, transactions
-backend/            LEGACY — old FastAPI + SaaS code, dormant, untouched
-frontend/           LEGACY — old Next.js UI, dormant, untouched
+financebuddy.db     SQLite at project root
+archive/            LEGACY — old FastAPI + Next.js SaaS code (dormant, kept for history)
+  backend/          old Python API (don't run, references Supabase)
+  frontend/         old Next.js UI
+  docs/             SaaS-era design docs
 ```
 
-The `backend/` venv (`backend/venv/`) is what `fb/` runs under — it already has `httpx`, `fastmcp`, `sqlalchemy`, etc. Don't create a new venv.
+Runtime env is `.venv/` at project root, created by `setup.sh`. Use `./.venv/bin/python` for one-off CLI invocations.
 
 ## How to use from Claude Code
 
@@ -64,20 +66,20 @@ Defaults to last 30 days when date range is omitted. Always confirm whether "las
 ## How to add a bank
 
 ```bash
-cd /Users/jialanren/projects/financebuddy
-./backend/venv/bin/python -m fb.connect_server
+cd $PROJECT_ROOT
+./.venv/bin/python -m fb.connect_server
 ```
 
 This starts a tiny server on `http://localhost:8787/` and opens the browser. User clicks **Connect**, completes Teller Connect, token saves directly to SQLite. Kill the server (Ctrl-C or `kill <pid>`) when done.
 
-Environments: `sandbox` (fake data, `username`/`password`), `development` (real accounts, limited institutions), `production` (requires Teller approval). App ID `app_pn55bmnf8k4papve7o000` is currently wired for development.
+Environments: `sandbox` (fake data, `username`/`password`), `development` (real accounts, limited institutions), `production` (requires Teller approval). Set your own `TELLER_APP_ID` and `TELLER_ENV` in `.env`.
 
 ## How to sync
 
 From the terminal:
 ```bash
-./backend/venv/bin/python -m fb.sync             # all institutions
-./backend/venv/bin/python -m fb.sync --institution <enr_...>
+./.venv/bin/python -m fb.sync             # all institutions
+./.venv/bin/python -m fb.sync --institution <enr_...>
 ```
 
 Or via MCP: ask and Claude calls `sync_now`. Teller returns ~90 days of history per call, so a full reseed after a gap pulls a bounded window — you keep earlier data because sync is upsert-only.
@@ -114,7 +116,7 @@ Schema changes: edit `fb/db.py` and add a migration block. No Alembic, just idem
 - **The MCP server caches nothing.** Every tool call hits SQLite directly. That's fine at 1k tx.
 - **Sync is blocking/synchronous.** A full sync with ~6 accounts takes a few seconds. Teller does rate-limit — if you see 429s, back off.
 - **Transactions that later settle change ID sometimes.** Sync is upsert on the current ID, so a pending→posted transition may create a new row. Acceptable; dedupe at query time if it matters.
-- **Don't touch `backend/` or `frontend/`** unless you're explicitly reviving the SaaS. They still reference Supabase (currently paused) and will error on startup.
+- **`archive/` is dead code.** The old FastAPI/Next.js SaaS lives there for history only. Nothing in the live app imports from it. Don't run it — it references Supabase (paused) and will error on startup.
 
 ## Reconfiguring the MCP server
 
@@ -122,8 +124,8 @@ Schema changes: edit `fb/db.py` and add a migration block. No Alembic, just idem
 claude mcp list                                      # see registered servers
 claude mcp get financebuddy                          # status
 claude mcp remove financebuddy -s user               # unregister
-claude mcp add -s user -e "PYTHONPATH=/Users/jialanren/projects/financebuddy" \
-  -- financebuddy /Users/jialanren/projects/financebuddy/backend/venv/bin/python \
+claude mcp add -s user -e "PYTHONPATH=$PROJECT_ROOT" \
+  -- financebuddy $PROJECT_ROOT/.venv/bin/python \
   -m fb.mcp_server                                   # re-register
 ```
 

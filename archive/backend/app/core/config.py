@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     encryption_key: str = ""
 
     # Teller API
-    teller_app_id: str = "app_pn55bmnf8k4papve7o000"
+    teller_app_id: str = "app_replace_with_your_own"
     teller_cert_path: str = "./certificate.pem"
     teller_key_path: str = "./private_key.pem"
     teller_env: TellerEnvironment = TellerEnvironment.SANDBOX

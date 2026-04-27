@@ -187,7 +187,7 @@ export default function PrivacyPage() {
               <li>Revoke API keys at any time</li>
             </ul>
             <p className="text-slate-600 mt-4 mb-3">
-              To exercise the following rights, please contact us at oliveren88@gmail.com:
+              To exercise the following rights, please contact us at support@example.com:
             </p>
             <ul className="list-disc list-inside text-slate-600 space-y-2">
               <li>Request a full export of your data</li>
@@ -244,7 +244,7 @@ export default function PrivacyPage() {
             </h2>
             <p className="text-slate-600">
               If you have questions about this Privacy Policy or our data practices, please
-              contact us at oliveren88@gmail.com.
+              contact us at support@example.com.
             </p>
           </section>
         </div>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -24,7 +25,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path in ("/", "/connect", "/connect.html"):
-            self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            html = PAGE.read_text(encoding="utf-8").replace(
+                "{{TELLER_APP_ID}}", os.environ.get("TELLER_APP_ID", "")
+            ).replace(
+                "{{TELLER_ENV}}", os.environ.get("TELLER_ENV", "development")
+            )
+            self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
         if self.path == "/institutions":
             with db.cursor() as conn:

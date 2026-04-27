@@ -246,7 +246,7 @@ export default function TermsPage() {
               16. Contact Information
             </h2>
             <p className="text-slate-600 leading-relaxed">
-              For questions about these Terms of Service, please contact us at oliveren88@gmail.com.
+              For questions about these Terms of Service, please contact us at support@example.com.
             </p>
           </section>
         </div>

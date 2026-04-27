@@ -127,7 +127,7 @@ export function InstitutionSidebar({ onDataChange, isOpen, onClose }: Institutio
 
     setAddingBank(true);
     const tellerConnect = window.TellerConnect.setup({
-      applicationId: process.env.NEXT_PUBLIC_TELLER_APP_ID || 'app_pn55bmnf8k4papve7o000',
+      applicationId: process.env.NEXT_PUBLIC_TELLER_APP_ID || 'app_replace_with_your_own',
       environment: process.env.NEXT_PUBLIC_TELLER_ENV || 'sandbox',
       products: ['balance', 'transactions', 'identity'],
       onSuccess: async (enrollment: any) => {
