@@ -1,6 +1,6 @@
 # FinanceBuddy
 
-A **local, single-user** personal finance tool that lives inside Claude Code.
+A **local, single-user** personal finance tool that lives inside Claude Code. 
 
 It pulls real bank data from [Teller.io](https://teller.io) into a local SQLite
 file, then exposes it to Claude through an MCP server — so you can ask things
@@ -147,6 +147,8 @@ archive/                 Old SaaS-era code (FastAPI + Next.js). Dormant.
   (the included `.gitignore` already blocks `*.pem`, `*.db`, and `.env`).
 - The MCP server is registered at **user scope** — only your account on this
   machine can talk to it. There is no network listener.
+
+  Important: Advice from Claude should be taken carefully and owner of this repo is not responsible for any decisions made.
 
 ---
 
