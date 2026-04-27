@@ -69,6 +69,49 @@ You can also drive it from the shell:
 
 ---
 
+## How data gets cleaned up for Claude
+
+Raw Teller data is messy: credit-card amounts have the opposite sign of
+checking accounts, transfers between your own accounts double-count as both
+income and spend, and merchant names are often cryptic strings. FinanceBuddy
+cleans this up in three layers so Claude can answer real questions.
+
+**1. Sync writes Teller's payload almost verbatim.**
+`fb/sync.py` upserts each transaction as-is. Only `category` and `merchant`
+are lifted out of `details`; everything else stays in `raw_json`. No
+normalization happens here — the goal is to never lose Teller data.
+
+**2. Queries normalize at read time.**
+`fb/classify.py` defines a `FLOW_EXPR` SQL fragment that flips the sign on
+credit/loan accounts so positive always means inflow and negative means
+outflow, regardless of account type. Every newer query joins `accounts` and
+uses this expression. Per-row noise filters (`excluded`, `is_transfer`)
+hide manually-flagged junk and internal transfers from aggregates.
+
+**3. Merchant classification (`auto_enrich`).**
+A merchant taxonomy (`income:salary`, `fixed:rent`, `variable:dining`, …)
+is built up by combining four sources:
+
+- **Salary detection** — recurring positive deposits on depository accounts
+  with stable amounts and biweekly/monthly cadence, or unambiguous payroll
+  keywords (`PAYROLL`, `DIRECT DEP`).
+- **Subscription detection** — stable monthly outflows $1–$200 across ≥3
+  months, with investment contributions excluded so Robinhood doesn't get
+  labeled as Netflix.
+- **Keyword scan** — substring matches against curated lists of utilities,
+  gyms, insurance providers, streaming services, grocers, gas stations, etc.
+- **LLM gap-fill** — `get_unclassified_merchants` returns the remaining
+  merchants with meaningful spend (pre-filtered to drop card-payment and
+  brokerage noise), Claude classifies them from world knowledge, and the
+  labels persist via `classify_merchant`.
+
+User-confirmed labels (`source='user'`) are never overwritten by automation.
+The `healthcheck` tool reads the resulting taxonomy to produce a structured
+Income / Fixed / Variable / Savings rollup — which is what makes "anything
+weird in my spending" a question Claude can actually answer.
+
+---
+
 ## What's in the repo
 
 ```
