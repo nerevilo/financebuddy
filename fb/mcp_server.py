@@ -1,12 +1,13 @@
 """MCP stdio server exposing FinanceBuddy data to Claude Code."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from fastmcp import FastMCP
 
-from . import classify, db, sync as sync_mod
+from . import classify, db
+from . import sync as sync_mod
 
 mcp = FastMCP("financebuddy")
 
@@ -144,21 +145,27 @@ def list_transactions(
     ]
     params: list = []
     if start_date:
-        sql.append("AND t.date >= ?"); params.append(start_date)
+        sql.append("AND t.date >= ?")
+        params.append(start_date)
     if end_date:
-        sql.append("AND t.date <= ?"); params.append(end_date)
+        sql.append("AND t.date <= ?")
+        params.append(end_date)
     if account_id:
-        sql.append("AND t.account_id = ?"); params.append(account_id)
+        sql.append("AND t.account_id = ?")
+        params.append(account_id)
     if merchant:
         sql.append("AND (t.merchant LIKE ? OR t.description LIKE ?)")
         like = f"%{merchant}%"
         params.extend([like, like])
     if min_amount is not None:
-        sql.append("AND t.amount >= ?"); params.append(min_amount)
+        sql.append("AND t.amount >= ?")
+        params.append(min_amount)
     if max_amount is not None:
-        sql.append("AND t.amount <= ?"); params.append(max_amount)
+        sql.append("AND t.amount <= ?")
+        params.append(max_amount)
     if tag:
-        sql.append("AND t.tags LIKE ?"); params.append(f"%,{tag},%")
+        sql.append("AND t.tags LIKE ?")
+        params.append(f"%,{tag},%")
     if not include_transfers:
         sql.append("AND t.is_transfer = 0")
     sql.append("ORDER BY t.date DESC, t.id DESC LIMIT ?")

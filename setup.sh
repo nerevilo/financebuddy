@@ -41,7 +41,7 @@ if [[ ! -x "$PY" ]]; then
 fi
 say "Installing dependencies"
 "$PY" -m pip install --quiet --upgrade pip
-"$PY" -m pip install --quiet -r requirements.txt
+"$PY" -m pip install --quiet -r requirements-dev.txt
 
 # 2. Teller certs
 if [[ ! -f "$CERT" || ! -f "$KEY" ]]; then

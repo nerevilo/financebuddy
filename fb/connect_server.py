@@ -50,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode())
             link(payload["id"], payload["name"], payload["token"])
-        except Exception as e:
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
             self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
             return
         self._send(200, json.dumps({"ok": True}).encode(), "application/json")

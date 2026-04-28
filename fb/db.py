@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -95,7 +96,7 @@ def init() -> None:
 
 
 @contextmanager
-def cursor():
+def cursor() -> Generator[sqlite3.Connection, None, None]:
     conn = connect()
     try:
         yield conn

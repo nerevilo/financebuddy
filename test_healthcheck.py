@@ -183,7 +183,7 @@ def test_cc_payment_heuristics_filtered_even_when_is_transfer_zero():
             _add_tx(conn, f"sp{i}", today - timedelta(days=days_ago), -10.0, "Spotify", "software")
         conn.commit()
 
-        from fb.mcp_server import _hc_subscriptions, _hc_buffer
+        from fb.mcp_server import _hc_buffer, _hc_subscriptions
         today_iso = today.isoformat()
         subs = _hc_subscriptions(
             conn,
@@ -223,63 +223,6 @@ def test_transfers_and_excluded_ignored_in_subscription_detection():
             (today - timedelta(days=30)).isoformat(),
         )
         assert not any(s["merchant"] == "CITI" for s in subs)
-
-
-# ---------------------------------------------------------------------------
-# Category trends
-# ---------------------------------------------------------------------------
-
-def test_category_surge_computed_correctly():
-    with tempfile.TemporaryDirectory() as td:
-        dbp = _make_db(Path(td))
-        conn = _conn(dbp)
-        _seed_institution_and_account(conn)
-
-        today = _today()
-        # Dining: $100 in prior window, $300 in current window → +200, +200%
-        _add_tx(conn, "p1", today - timedelta(days=45), -100.0, "Chipotle", "dining")
-        _add_tx(conn, "c1", today - timedelta(days=10), -150.0, "Chipotle", "dining")
-        _add_tx(conn, "c2", today - timedelta(days=5), -150.0, "Chipotle", "dining")
-        conn.commit()
-
-        from fb.mcp_server import _hc_category_trends
-        current_start = (today - timedelta(days=30)).isoformat()
-        trends = _hc_category_trends(
-            conn,
-            (today - timedelta(days=60)).isoformat(),
-            current_start,
-            today.isoformat(),
-        )
-        dining = next(t for t in trends if t["category"] == "dining")
-        assert dining["current"] == 300.0
-        assert dining["prior"] == 100.0
-        assert dining["abs_change"] == 200.0
-        assert dining["pct_change"] == 200.0
-
-
-def test_new_category_flagged_when_prior_zero():
-    with tempfile.TemporaryDirectory() as td:
-        dbp = _make_db(Path(td))
-        conn = _conn(dbp)
-        _seed_institution_and_account(conn)
-
-        today = _today()
-        # Only current-window dining spend
-        _add_tx(conn, "c1", today - timedelta(days=5), -75.0, "NewRestaurant", "dining")
-        conn.commit()
-
-        from fb.mcp_server import _hc_category_trends
-        current_start = (today - timedelta(days=30)).isoformat()
-        trends = _hc_category_trends(
-            conn,
-            (today - timedelta(days=60)).isoformat(),
-            current_start,
-            today.isoformat(),
-        )
-        dining = next(t for t in trends if t["category"] == "dining")
-        assert dining["prior"] == 0.0
-        assert dining["current"] == 75.0
-        assert dining["new_category"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -425,18 +368,22 @@ def test_healthcheck_returns_expected_shape():
         result = fn()
 
         assert set(result.keys()) == {
-            "window", "subscriptions", "category_trends", "outliers",
-            "new_merchants", "buffer", "cc_utilization", "flags",
+            "window", "income", "fixed", "variable", "savings",
+            "buffer", "cc_utilization", "unclassified", "refunds_unattributed",
+            "anomalies", "flags",
         }
         assert "current_start" in result["window"]
         assert "current_end" in result["window"]
         assert "prior_start" in result["window"]
         assert "prior_end" in result["window"]
-        assert isinstance(result["subscriptions"], list)
-        assert isinstance(result["category_trends"], list)
-        assert isinstance(result["outliers"], list)
-        assert isinstance(result["new_merchants"], list)
+        assert isinstance(result["income"], dict)
+        assert isinstance(result["fixed"], dict)
+        assert isinstance(result["variable"], dict)
+        assert isinstance(result["savings"], dict)
         assert isinstance(result["buffer"], dict)
+        assert isinstance(result["anomalies"], dict)
+        assert isinstance(result["anomalies"]["outliers"], list)
+        assert isinstance(result["anomalies"]["new_merchants"], list)
         assert isinstance(result["cc_utilization"], list)
         assert isinstance(result["flags"], list)
 

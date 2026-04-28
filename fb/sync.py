@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from datetime import datetime, timezone
 
 import httpx
@@ -15,7 +16,7 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _upsert_account(conn, institution_id: str, acc: dict, balances: dict | None) -> None:
+def _upsert_account(conn: sqlite3.Connection, institution_id: str, acc: dict, balances: dict | None) -> None:
     current = balances.get("ledger") if balances else None
     available = balances.get("available") if balances else None
     conn.execute(
@@ -48,7 +49,7 @@ def _upsert_account(conn, institution_id: str, acc: dict, balances: dict | None)
     )
 
 
-def _upsert_transaction(conn, account_id: str, tx: dict) -> None:
+def _upsert_transaction(conn: sqlite3.Connection, account_id: str, tx: dict) -> None:
     details = tx.get("details") or {}
     category = details.get("category")
     counterparty = (details.get("counterparty") or {}).get("name")
