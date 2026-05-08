@@ -240,11 +240,15 @@ def month_summary(year: int, month: int) -> dict:
         row = conn.execute(
             """
             SELECT
-                COALESCE(SUM(CASE WHEN amount > 0 THEN amount END), 0) AS income,
-                COALESCE(SUM(CASE WHEN amount < 0 THEN amount END), 0) AS spend,
+                COALESCE(SUM(CASE WHEN flow > 0 THEN flow END), 0) AS income,
+                COALESCE(SUM(CASE WHEN flow < 0 THEN flow END), 0) AS spend,
                 COUNT(*) AS tx_count
-            FROM transactions
-            WHERE date BETWEEN ? AND ? AND excluded = 0 AND is_transfer = 0
+            FROM (
+                SELECT CASE WHEN a.type IN ('credit','loan') THEN -t.amount ELSE t.amount END AS flow
+                FROM transactions t
+                JOIN accounts a ON t.account_id = a.id
+                WHERE t.date BETWEEN ? AND ? AND t.excluded = 0 AND t.is_transfer = 0
+            )
             """,
             (start, end),
         ).fetchone()
