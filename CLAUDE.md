@@ -117,6 +117,7 @@ Schema changes: edit `fb/db.py` and add a migration block. No Alembic, just idem
 - **Sync is blocking/synchronous.** A full sync with ~6 accounts takes a few seconds. Teller does rate-limit — if you see 429s, back off.
 - **Transactions that later settle change ID sometimes.** Sync is upsert on the current ID, so a pending→posted transition may create a new row. Acceptable; dedupe at query time if it matters.
 - **`archive/` is dead code.** The old FastAPI/Next.js SaaS lives there for history only. Nothing in the live app imports from it. Don't run it — it references Supabase (paused) and will error on startup.
+- **`month_summary` double-counts credit card transactions as income.** The tool sums raw Teller amounts without normalizing for account type: credit card purchases (positive in Teller) are counted as *income*, and credit card payments/refunds (negative) are counted as *spend*. With a linked credit card, `month_summary` income is overstated and spend is understated by roughly the total of all CC charges that month. For accurate income/spend, use `healthcheck` (which uses the `FLOW_EXPR` normalization) or query SQLite directly with `CASE WHEN a.type IN ('credit','loan') THEN -t.amount ELSE t.amount END`. Also mark credit card autopayments as `is_transfer=true` via `annotate_transaction` — otherwise they inflate spend a second time on the depository side.
 
 ## Reconfiguring the MCP server
 
