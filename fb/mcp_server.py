@@ -1,7 +1,9 @@
 """MCP stdio server exposing FinanceBuddy data to Claude Code."""
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
+from datetime import date as date_cls
 from typing import Optional
 
 from fastmcp import FastMCP
@@ -1022,6 +1024,87 @@ def annotate_transaction(
         )
         if cur.rowcount == 0:
             raise ValueError(f"No transaction with id {tx_id}")
+        row = conn.execute(
+            """
+            SELECT t.id, t.date, t.amount, t.description, t.merchant, t.category,
+                   t.note, t.excluded, t.tags, t.is_transfer,
+                   a.name AS account_name
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.id = ?
+            """,
+            (tx_id,),
+        ).fetchone()
+    return _tx_rows([row])[0]
+
+
+_CASH_INST_ID = "cash"
+_CASH_ACCT_ID = "acc_cash"
+
+
+def _ensure_cash_account(conn) -> str:
+    """Lazily create the synthetic depository account that holds manually
+    recorded cash / off-bank transactions. Idempotent."""
+    conn.execute(
+        "INSERT OR IGNORE INTO institutions (id, name, access_token) VALUES (?, ?, ?)",
+        (_CASH_INST_ID, "Cash / Off-bank", "n/a"),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO accounts (id, institution_id, name, type, subtype, currency) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (_CASH_ACCT_ID, _CASH_INST_ID, "Cash / Off-bank", "depository", "cash", "USD"),
+    )
+    return _CASH_ACCT_ID
+
+
+@mcp.tool()
+def record_cash_transaction(
+    amount: float,
+    description: str,
+    date: Optional[str] = None,
+    kind: str = "expense",
+    category: Optional[str] = None,
+) -> dict:
+    """
+    Record a cash / off-bank transaction that Teller can't see.
+
+    Teller only sees bank and card activity. Rent paid in cash, Venmo/Zelle the
+    user describes, cash tips, gifts — none of it shows up, so any budget or
+    spend total that ignores it is wrong. Use this to put it in the books.
+
+    - `amount`: positive magnitude (e.g. 1700 for $1,700 rent). The sign is set
+      from `kind`, stored on a synthetic depository "Cash / Off-bank" account
+      using the standard convention (expense = negative, income = positive).
+    - `description`: what it was, e.g. "Boston rent (cash, my half)". Stored as
+      the description; this is the key healthcheck/classify use, so make it
+      stable and meaningful if it recurs.
+    - `date`: ISO YYYY-MM-DD. Defaults to today.
+    - `kind`: "expense" (outflow, default) or "income" (inflow).
+    - `category`: optional Teller-style category hint (e.g. "rent", "food").
+
+    The row is a normal `transactions` row, so it counts in every aggregate
+    (spend totals, healthcheck, budget) from now on. It does NOT affect
+    net-worth balances (the cash account carries no tracked balance). Check
+    `search` first if you might be duplicating something already synced.
+
+    Returns the inserted row.
+    """
+    if kind not in ("expense", "income"):
+        raise ValueError("kind must be 'expense' or 'income'")
+    if amount <= 0:
+        raise ValueError("amount must be a positive magnitude; use `kind` to set direction")
+    tx_date = date or date_cls.today().isoformat()
+    signed = -abs(amount) if kind == "expense" else abs(amount)
+    tx_id = f"cash_{uuid.uuid4().hex[:16]}"
+    with db.cursor() as conn:
+        _ensure_cash_account(conn)
+        conn.execute(
+            "INSERT INTO transactions (id, account_id, date, amount, description, "
+            "merchant, category, status, raw_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (tx_id, _CASH_ACCT_ID, tx_date, signed, description, None,
+             category, "posted", '{"source":"manual"}'),
+        )
         row = conn.execute(
             """
             SELECT t.id, t.date, t.amount, t.description, t.merchant, t.category,

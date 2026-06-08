@@ -49,6 +49,7 @@ MCP server name: **`financebuddy`** (stdio, user scope). Tools exposed:
 | `search` | LIKE on description + merchant |
 | `sync_now` | Pull fresh data from Teller (all institutions, or one) |
 | `annotate_transaction` | Note / exclude / tag / mark-transfer one transaction |
+| `record_cash_transaction` | Record a cash / off-bank expense or income Teller can't see (e.g. cash rent) |
 | `classify_merchant` | Persist a merchant → taxonomy label (`income:salary`, `fixed:rent`, `variable:dining`, etc.) |
 | `list_classifications` | View current merchant classifications |
 | `auto_enrich` | Run heuristics (cadence + keyword) to bulk-classify merchants |
@@ -117,6 +118,9 @@ Schema changes: edit `fb/db.py` and add a migration block. No Alembic, just idem
 - **Sync is blocking/synchronous.** A full sync with ~6 accounts takes a few seconds. Teller does rate-limit — if you see 429s, back off.
 - **Transactions that later settle change ID sometimes.** Sync is upsert on the current ID, so a pending→posted transition may create a new row. Acceptable; dedupe at query time if it matters.
 - **`archive/` is dead code.** The old FastAPI/Next.js SaaS lives there for history only. Nothing in the live app imports from it. Don't run it — it references Supabase (paused) and will error on startup.
+- **~25% of transactions have `merchant = NULL`.** Teller only sets `merchant` from `details.counterparty.name`, which is absent for bank-initiated rows (rent ACH, interest, internal transfers, Zelle). The canonical merchant key is therefore `COALESCE(NULLIF(TRIM(merchant),''), description)` — see `classify.MERCHANT_KEY` and the healthcheck's `merchant or description` (mcp_server.py). **Any ad-hoc query that groups by raw `t.merchant` will silently drop these rows** (this once hid a $1,095 rent payment from spend totals). Use the COALESCE key when writing new aggregates.
+- **Cash / off-bank spend is invisible.** Teller sees only bank + card activity. Rent paid in cash, Venmo/Zelle splits, cash tips won't appear, so "spent so far" / budget totals under-report unless you ask and record them via `record_cash_transaction` (stored on a synthetic `cash` depository account; participates in all aggregates, doesn't affect net worth).
+- **Biweekly pay → two months/year have 3 paychecks.** 26 checks ÷ 12 ≈ 2.17/mo. A 3-paycheck month inflates windowed income and is NOT the run-rate — when budgeting a "normal" month, count 2. See the `fb-budget` skill for forward-budgeting methodology (income projection, arrears lag on new jobs, per-day/week run-rates).
 - **`month_summary` double-counts credit card transactions as income.** The tool sums raw Teller amounts without normalizing for account type: credit card purchases (positive in Teller) are counted as *income*, and credit card payments/refunds (negative) are counted as *spend*. With a linked credit card, `month_summary` income is overstated and spend is understated by roughly the total of all CC charges that month. For accurate income/spend, use `healthcheck` (which uses the `FLOW_EXPR` normalization) or query SQLite directly with `CASE WHEN a.type IN ('credit','loan') THEN -t.amount ELSE t.amount END`. Also mark credit card autopayments as `is_transfer=true` via `annotate_transaction` — otherwise they inflate spend a second time on the depository side.
 
 ## Reconfiguring the MCP server

@@ -29,6 +29,47 @@ def _start_iso(lookback_days: int) -> str:
 FLOW_EXPR = "(CASE WHEN a.type IN ('credit','loan') THEN -t.amount ELSE t.amount END)"
 
 
+# Canonical merchant key. Teller leaves `merchant` (counterparty.name) NULL for
+# bank-initiated rows — rent ACH, interest, internal transfers, Zelle — which is
+# ~25% of this user's transactions. The healthcheck reporting layer keys those on
+# `merchant or description` (mcp_server.py:694), so the classification pipeline
+# MUST use the same key, or null-merchant rows are invisible to every detector
+# and can never be auto-classified or surfaced for the LLM. Use this everywhere
+# a query groups by or returns a "merchant". Requires the transactions table to
+# be aliased `t`.
+MERCHANT_KEY = "COALESCE(NULLIF(TRIM(t.merchant), ''), t.description)"
+
+
+# Description / merchant patterns that indicate an internal transfer or card
+# payment even when is_transfer isn't set. Mirrors _HC_TRANSFERISH in
+# mcp_server.py. Append to a detector's WHERE clause (the detectors already
+# constrain is_transfer = 0 and excluded = 0). Critical now that detectors see
+# null-merchant rows: without it, internal "Deposit from … XXXXXXX" moves and
+# CC autopays would leak into salary / rent / subscription detection.
+_TRANSFERISH = """
+  AND COALESCE(t.category, '') NOT IN ('transfer', 'investment')
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%AUTOPAY%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%AUTO-PMT%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%AUTOMATIC PAYMENT%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%ONLINE PAYMENT%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%MOBILE PAYMENT%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%CC PAYMENT%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%PAYMENT THANK YOU%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE 'WITHDRAWAL TO %XXXXXXX%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE 'DEPOSIT FROM %XXXXXXX%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%INST XFER%'
+  AND UPPER(COALESCE(t.description, '')) NOT LIKE '%PAYPAL%INST%'
+  AND UPPER(COALESCE(t.merchant, '')) NOT IN (
+        'CITI', 'CITIBANK', 'CHASE', 'JPMORGAN CHASE',
+        'AMEX', 'AMERICAN EXPRESS', 'CAPITAL ONE', 'CAPITALONE',
+        'DISCOVER', 'BARCLAYCARD', 'BARCLAYS', 'WELLS FARGO',
+        'BANK OF AMERICA', 'BOFA', 'US BANK', 'USAA',
+        'ROBINHOOD', 'MSPBNA', 'FIDELITY', 'VANGUARD', 'SCHWAB',
+        'MORGAN STANLEY', 'E*TRADE', 'ETRADE'
+  )
+"""
+
+
 TAXONOMY: set[str] = {
     "income:salary",
     "income:refund",
@@ -234,7 +275,7 @@ def detect_salary(conn: sqlite3.Connection, lookback_days: int = 180) -> list[di
     # Salary is always inflow on depository. Using flow > 0 (normalized).
     rows = conn.execute(
         f"""
-        SELECT t.merchant,
+        SELECT {MERCHANT_KEY} AS merchant,
                COUNT(*) AS n,
                AVG({FLOW_EXPR}) AS avg_amt,
                MIN({FLOW_EXPR}) AS min_amt,
@@ -245,10 +286,11 @@ def detect_salary(conn: sqlite3.Connection, lookback_days: int = 180) -> list[di
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
         WHERE {FLOW_EXPR} > 0 AND t.excluded = 0 AND t.is_transfer = 0
-          AND t.merchant IS NOT NULL AND t.merchant != ''
+          AND {MERCHANT_KEY} IS NOT NULL AND {MERCHANT_KEY} != ''
           AND a.type = 'depository'
           AND t.date >= ?
-        GROUP BY t.merchant
+          {_TRANSFERISH}
+        GROUP BY {MERCHANT_KEY}
         HAVING n >= 2 AND avg_amt >= 200
         """,
         (start,),
@@ -324,7 +366,7 @@ def detect_rent_candidates(conn: sqlite3.Connection, lookback_days: int = 180) -
     start = _start_iso(lookback_days)
     rows = conn.execute(
         f"""
-        SELECT t.merchant,
+        SELECT {MERCHANT_KEY} AS merchant,
                COUNT(*) AS n,
                AVG(-{FLOW_EXPR}) AS avg_amt,
                MIN(-{FLOW_EXPR}) AS min_amt,
@@ -332,14 +374,15 @@ def detect_rent_candidates(conn: sqlite3.Connection, lookback_days: int = 180) -
                GROUP_CONCAT(t.date, '|') AS dates
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
-        LEFT JOIN merchant_classifications mc ON mc.merchant = t.merchant
+        LEFT JOIN merchant_classifications mc ON mc.merchant = {MERCHANT_KEY}
         WHERE {FLOW_EXPR} < 0 AND t.excluded = 0 AND t.is_transfer = 0
-          AND t.merchant IS NOT NULL AND t.merchant != ''
+          AND {MERCHANT_KEY} IS NOT NULL AND {MERCHANT_KEY} != ''
           AND -{FLOW_EXPR} BETWEEN 600 AND 6000
           AND a.type = 'depository'
           AND t.date >= ?
           AND mc.merchant IS NULL
-        GROUP BY t.merchant
+          {_TRANSFERISH}
+        GROUP BY {MERCHANT_KEY}
         HAVING n >= 2
         """,
         (start,),
@@ -379,7 +422,7 @@ def detect_subscriptions(conn: sqlite3.Connection, lookback_days: int = 180) -> 
     start = _start_iso(lookback_days)
     rows = conn.execute(
         f"""
-        SELECT t.merchant,
+        SELECT {MERCHANT_KEY} AS merchant,
                COUNT(*) AS n,
                COUNT(DISTINCT strftime('%Y-%m', t.date)) AS months,
                AVG(-{FLOW_EXPR}) AS avg_amt,
@@ -389,11 +432,11 @@ def detect_subscriptions(conn: sqlite3.Connection, lookback_days: int = 180) -> 
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
         WHERE {FLOW_EXPR} < 0 AND t.excluded = 0 AND t.is_transfer = 0
-          AND COALESCE(t.category, '') NOT IN ('investment', 'transfer')
-          AND t.merchant IS NOT NULL AND t.merchant != ''
+          AND {MERCHANT_KEY} IS NOT NULL AND {MERCHANT_KEY} != ''
           AND -{FLOW_EXPR} BETWEEN 1 AND 200
           AND t.date >= ?
-        GROUP BY t.merchant
+          {_TRANSFERISH}
+        GROUP BY {MERCHANT_KEY}
         HAVING months >= 3
         """,
         (start,),
@@ -434,15 +477,16 @@ def keyword_scan(conn: sqlite3.Connection, lookback_days: int = 180) -> list[dic
     """
     start = _start_iso(lookback_days)
     rows = conn.execute(
-        """
-        SELECT merchant,
-               MAX(UPPER(COALESCE(description, ''))) AS sample_desc,
+        f"""
+        SELECT {MERCHANT_KEY} AS merchant,
+               MAX(UPPER(COALESCE(t.description, ''))) AS sample_desc,
                COUNT(*) AS n
-        FROM transactions
-        WHERE merchant IS NOT NULL AND merchant != ''
-          AND excluded = 0 AND is_transfer = 0
-          AND date >= ?
-        GROUP BY merchant
+        FROM transactions t
+        WHERE {MERCHANT_KEY} IS NOT NULL AND {MERCHANT_KEY} != ''
+          AND t.excluded = 0 AND t.is_transfer = 0
+          AND t.date >= ?
+          {_TRANSFERISH}
+        GROUP BY {MERCHANT_KEY}
         """,
         (start,),
     ).fetchall()
@@ -544,12 +588,13 @@ def unclassified_merchants(
     Intended to be handed to the LLM for world-knowledge classification.
     """
     start = (date.today() - timedelta(days=days)).isoformat()
-    # Mirror _HC_TRANSFERISH filtering so credit-card autopay, investment
-    # contributions (Robinhood), and self-transfers don't show up as
-    # unclassified spend that the LLM has to label.
+    # _TRANSFERISH filtering so credit-card autopay, investment contributions
+    # (Robinhood), and self-transfers don't show up as unclassified spend that
+    # the LLM has to label. Keyed on MERCHANT_KEY so null-merchant rows (rent
+    # ACH, bills) surface here for classification instead of falling silent.
     rows = conn.execute(
         f"""
-        SELECT t.merchant,
+        SELECT {MERCHANT_KEY} AS merchant,
                SUM(-{FLOW_EXPR}) AS spent,
                COUNT(*) AS n,
                MAX(t.description) AS sample_description,
@@ -558,32 +603,14 @@ def unclassified_merchants(
                MAX(t.date) AS last_seen
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
-        LEFT JOIN merchant_classifications mc ON mc.merchant = t.merchant
+        LEFT JOIN merchant_classifications mc ON mc.merchant = {MERCHANT_KEY}
         WHERE {FLOW_EXPR} < 0
           AND t.excluded = 0 AND t.is_transfer = 0
-          AND COALESCE(t.category, '') NOT IN ('transfer', 'investment')
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%AUTOPAY%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%AUTO-PMT%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%AUTOMATIC PAYMENT%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%ONLINE PAYMENT%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%MOBILE PAYMENT%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%CC PAYMENT%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%PAYMENT THANK YOU%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE 'WITHDRAWAL TO %XXXXXXX%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%INST XFER%'
-          AND UPPER(COALESCE(t.description, '')) NOT LIKE '%PAYPAL%INST%'
-          AND UPPER(COALESCE(t.merchant, '')) NOT IN (
-                'CITI', 'CITIBANK', 'CHASE', 'JPMORGAN CHASE',
-                'AMEX', 'AMERICAN EXPRESS', 'CAPITAL ONE', 'CAPITALONE',
-                'DISCOVER', 'BARCLAYCARD', 'BARCLAYS', 'WELLS FARGO',
-                'BANK OF AMERICA', 'BOFA', 'US BANK', 'USAA',
-                'ROBINHOOD', 'MSPBNA', 'FIDELITY', 'VANGUARD', 'SCHWAB',
-                'MORGAN STANLEY', 'E*TRADE', 'ETRADE'
-          )
-          AND t.merchant IS NOT NULL AND t.merchant != ''
+          AND {MERCHANT_KEY} IS NOT NULL AND {MERCHANT_KEY} != ''
           AND t.date >= ?
           AND mc.merchant IS NULL
-        GROUP BY t.merchant
+          {_TRANSFERISH}
+        GROUP BY {MERCHANT_KEY}
         HAVING spent >= ?
         ORDER BY spent DESC
         LIMIT ?
